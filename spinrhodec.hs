@@ -1,7 +1,22 @@
 {-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 
--- TODO:
---  * read input properly and hopefully not in such an imperative fashion
+{- This program is free software. It comes without any warranty, to
+ - the extent permitted by applicable law. You can redistribute it
+ - and/or modify it under the terms of the Do What The Fuck You Want
+ - To Public License, Version 2, as published by Sam Hocevar. See
+ - http://www.wtfpl.net/, or the LICENSE file distributed with this
+ - repository for more details.
+ -}
+
+{- TODO:
+  * read input properly and hopefully not in such an imperative fashion
+  * LIGHTING
+    * something like 1/4th of the total lighting calc time is taken up by
+      calls to `turns` and `pointInQuad`
+    * also lighting is horrifically slow (as one might expect)
+    * consider doing a flood rayout out from each lit face instead of having
+      every single visible face in the world raycast to every light
+-}
 
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.STM
