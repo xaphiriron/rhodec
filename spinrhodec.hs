@@ -43,10 +43,7 @@ import Graphics.Rendering.OpenGL (($=), GLfloat, GLubyte, GLmatrix(..), Primitiv
 import qualified Graphics.Rendering.OpenGL as GL
 import Graphics.UI.GLFW (Key(..), KeyButtonState (Release, Press))
 import qualified Graphics.UI.GLFW as GLFW
-import Graphics.Rendering.OpenGL.GL.VertexSpec
-import qualified Foreign.Ptr as F (castPtr, Ptr(..))
-import qualified Foreign.Storable as F (peek, Storable(..))
-import qualified Foreign.Marshal.Utils as F (new)
+import Graphics.Rendering.OpenGL.GL.VertexSpec (Normal3(..))
 
 import Linear.Metric
 import Linear.Quaternion
