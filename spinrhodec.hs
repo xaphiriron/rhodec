@@ -8,18 +8,6 @@
  - repository for more details.
  -}
 
-{- TODO:
-  * read input properly and hopefully not in such an imperative fashion
-  * LIGHTING
-    * something like 1/4th of the total lighting time/memory is taken up by
-      calls to `turns` and `pointInQuad`
-    * also lighting is horrifically slow (as one might expect)
-    * consider doing a flood rayout out from each lit face instead of having
-      every single visible face in the world raycast to every light
-  * GEOMETRY
-    * subdivide visible cells (from 4 pts to 9 pts, at least) and deform each point based on the surrounding cell types (currently this happens but only for 4pt quads, whereas i'd like to change the fundamental geometry to a radial triangle fan)
--}
-
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
