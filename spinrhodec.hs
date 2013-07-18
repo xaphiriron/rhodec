@@ -597,9 +597,6 @@ drawQuad (c, n, XQuad v0 v1 v2 v3) = do
 drawTriStrip :: [V3 GLfloat] -> IO ()
 drawTriStrip = GL.renderPrimitive TriangleStrip . sequence_ . fmap (GL.vertex . toVertex)
 
-emitter :: Cell -> Bool
-emitter (Cell ct) = (0 /=) . cellLight $ ct
-
 update :: TChan GLFWEvent -> GameState -> IO GameState
 update eventsR s = do
 	as <- input eventsR s -- player input events
