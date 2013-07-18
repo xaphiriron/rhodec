@@ -787,7 +787,7 @@ glfwInit eventsW = do
 	GL.blend $= GL.Enabled
 	GL.blendFunc $= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
 	GL.cullFace $= Just GL.Back
-	GL.clearColor $= Color4 0.5 0.5 0.5 0
+	GL.clearColor $= Color4 0.6 1.0 0.0 0
 
 	GL.depthFunc $= Just Lequal
 
