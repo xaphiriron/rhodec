@@ -11,7 +11,7 @@
 {- TODO:
   * read input properly and hopefully not in such an imperative fashion
   * LIGHTING
-    * something like 1/4th of the total lighting calc time is taken up by
+    * something like 1/4th of the total lighting time/memory is taken up by
       calls to `turns` and `pointInQuad`
     * also lighting is horrifically slow (as one might expect)
     * consider doing a flood rayout out from each lit face instead of having
@@ -32,7 +32,7 @@ import Control.Monad.Random
 import Control.Lens
 import Control.Applicative (Applicative(..), pure, (<*>), (<$>))
 import Data.Function (on)
-import Data.List (sortBy, group, groupBy, mapAccumR, transpose, elemIndex)
+import Data.List (sortBy, group, groupBy, mapAccumR, transpose, elemIndex, genericLength)
 import Data.Maybe (catMaybes, mapMaybe, catMaybes, isNothing, fromMaybe, listToMaybe)
 import Data.Ratio ((%))
 import Data.Monoid
@@ -277,27 +277,28 @@ ns =
 	]
 
 {- this has several properties:
+	the int values are arguments to `v`, which turns them into 3d points (knowing the int values themselves is useful in some cases)
 	all the quads are front-facing.
 	the vector/quad pair is such that each face listed shares that face with the adjacent cell denoted in the vector
 	the list is ordered so that its reverse gives the face on the opposite side of the cell, or, identically, the its reverse gives the face shared with the adjacent cell
 -}
-faces :: [(XQuad (V3 GLfloat), CellCoordinate)]
+faces :: [(XQuad Int, CellCoordinate)]
 faces =
-	[	(XQuad (v 6) (v 11) (v 7) (v 13), V3   1    0    0 )
-	,	(XQuad (v 3) (v  9) (v 7) (v 11), V3   0    1    0 )
-	,	(XQuad (v 7) (v  9) (v 5) (v 13), V3   0    0    1 )
+	[	(XQuad 6 11 7 13, V3   1    0    0 )
+	,	(XQuad 3  9 7 11, V3   0    1    0 )
+	,	(XQuad 7  9 5 13, V3   0    0    1 )
 
-	,	(XQuad (v 6) (v  8) (v 2) (v 11), V3   1    0  (-1))
-	,	(XQuad (v 1) (v  9) (v 3) (v 12), V3 (-1)   1    0 )
-	,	(XQuad (v 5) (v 10) (v 4) (v 13), V3   0  (-1)   1 )
+	,	(XQuad 6  8 2 11, V3   1    0  (-1))
+	,	(XQuad 1  9 3 12, V3 (-1)   1    0 )
+	,	(XQuad 5 10 4 13, V3   0  (-1)   1 )
 
-	,	(XQuad (v 3) (v 11) (v 2) (v 12), V3   0    1  (-1))
-	,	(XQuad (v 4) (v  8) (v 6) (v 13), V3   1  (-1)   0 )
-	,	(XQuad (v 5) (v  9) (v 1) (v 10), V3 (-1)   0    1 )
+	,	(XQuad 3 11 2 12, V3   0    1  (-1))
+	,	(XQuad 4  8 6 13, V3   1  (-1)   0 )
+	,	(XQuad 5  9 1 10, V3 (-1)   0    1 )
 
-	,	(XQuad (v 2) (v  8) (v 0) (v 12), V3   0    0  (-1))
-	,	(XQuad (v 0) (v  8) (v 4) (v 10), V3   0  (-1)   0 )
-	,	(XQuad (v 0) (v 10) (v 1) (v 12), V3 (-1)   0    0 )
+	,	(XQuad 2  8 0 12, V3   0    0  (-1))
+	,	(XQuad 0  8 4 10, V3   0  (-1)   0 )
+	,	(XQuad 0 10 1 12, V3 (-1)   0    0 )
 	]
 
 v :: Int -> V3 GLfloat
@@ -392,13 +393,17 @@ raycast' o r c =
 	where
 		adjFaceCell :: Face -> V3 Int
 		adjFaceCell (Face _ i _ _) = snd . (faces !!) $ i
-		-- a _line_ can either miss the given cell entirely (Nothing) or it can hit two faces as it passes through it. we're assuming hits through one point will never, in practice, happen (it'll error)
 		rayCollide :: WorldSpace -> V3 Float -> CellCoordinate -> Maybe (Face, Face)
 		rayCollide origin ray cell =
 			case (mf, mb) of
 				(Just f, Just b) -> Just (f, b)
 				(Just f@(Face c i _ point), Nothing) ->
-					-- error handling :(
+					{-
+					... if there's ONE T then you're passing through an edge, and you can hit the sole other face that shares that edge
+					... if there're TWO (adjacent) Ts then you're passing through a vertex, and you can pick any of the other faces that share that vertex
+					... otherwise there's some mysterious kind of numerical instability
+					-}
+					-- error handling for tangental hits :(
 					case maybe 0 (length . filter (== T)) $ turnsHit origin ray cell i of
 						1 ->
 							case mj origin ray cell i of
@@ -424,11 +429,6 @@ raycast' o r c =
 				fs =
 					mapMaybe (quadHit origin ray cell) [0..11]
 				mj o r c i = do
-					{-
-					... if there's ONE T then you're passing through an edge, and you can hit the sole other face that shares that edge
-					... if there're TWO (adjacent) Ts then you're passing through a vertex, and you can pick any of the other faces that share that vertex
-					... otherwise there's some mysterious kind of numerical instability
-					-}
 					t <- (=<<) (elemIndex T) $ turnsHit o r c i
 					let u = (t + 1) `mod` 4
 					let tv = (!! t) (points $ fst $ faces !! i)
@@ -443,7 +443,7 @@ raycast' o r c =
 turnsHit ::  WorldSpace -> V3 Float -> CellCoordinate -> Int -> Maybe [Turn]
 turnsHit o r c i = pointInQuad' q i <$> mpoint
 	where
-		q@(XQuad v0 v1 v2 v3) = fmap (lattice c +) . fst $ faces !! i
+		q@(XQuad v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
 		n = ns !! i
 		mpoint = fmap (\t -> o + (r ^* t)) $ planeLineIntersection (quadPlane q i) o r
 
@@ -453,7 +453,7 @@ quadHit o r c i =
 		then Face c i <$> mside <*> mpoint
 		else Nothing
 	where
-		q@(XQuad v0 v1 v2 v3) = fmap (lattice c +) . fst $ faces !! i
+		q@(XQuad v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
 		n = ns !! i
 		mside = case r `dot` n of
 			x	|	x < 0 -> Just Front
@@ -508,6 +508,7 @@ planeLineIntersection (Plane n o) l0 l1 =
 	where
 		l0' = l0 - o
 
+-- this isn't used currently b/c _evidently_ it's kind of expensive. who would have thought.
 quadNormal :: (Floating a, Epsilon a) => XQuad (V3 a) -> V3 a
 quadNormal (XQuad v0 v1 _ v3) = normalize $ (v1 - v0) `cross` (v3 - v0)
 
@@ -637,6 +638,7 @@ runThisEveryTick = do
 			hw = 640 / 2
 			hh = 480 / 2
 
+-- the point of this: to have a place to wedge in a controller-based move scheme later
 class MoveVector a where
 	moveVector :: (Floating b, Epsilon b) => a -> IO (V2 b)
 
@@ -659,7 +661,7 @@ instance MoveVector Keys where
 				_ -> 0) 0
 		return . normalize $ forwardMotion ^+^ sideMotion
 
--- todo: i'd like to isolate this so that both rotation and movement work relative to some (varying) "up vector", so that 1. pitch stops when the front sight vector is along the up vector (i.e., the dot product is one) and 2. movement happens orthogonal to the gravity vector, along the vector that's like, the dual cross product from the view vector (i.e., up `cross` (sight `cross` up) or whichever ordering is right there)
+-- todo: i'd like to isolate this so that both rotation and movement work relative to some (varying) "up vector", so that 1. pitch stops when the front sight vector is along the up vector (i.e., the dot product is one or negative one) and 2. movement happens orthogonal to the gravity vector, along the vector that's like, the dual cross product from the view vector (i.e., up `cross` (sight `cross` up) or whichever ordering is right there)
 
 {-
 	pos->move_up.x = 0.0;
@@ -762,7 +764,7 @@ render c t = do
 	sequence_ .
 		fmap drawQuad .
 			join .
-				fmap quads $
+				fmap (quads $ w ^. cells) $
 					_storedGeometry w
 	GLFW.swapBuffers
 
@@ -832,13 +834,16 @@ main = do
 	let (baseMap, _) = runRand (do
 		g <- getSplit
 		let (hull, g') = rect 8 8 8
-			[	(WhiteCell, 1 % 1)
+			[	(Dirt, 1 % 2)
+			,	(Rock, 1 % 2)
+			,	(Gold, 1 % 32)
 			] g
 		let (inside, g'') = rect 6 6 6
 			[	(Air, 1 % 1)
 			] g'
 		let (pillar, _) = rect 8 1 1
-			[	(RedCell, 1 % 1)
+			[	(RedCell, 1 % 3)
+			,	(WhiteCell, 2 % 3)
 			] g''
 		return $ mconcat
 			[	shift (ijk $ V3 0 5 2) pillar
@@ -1039,14 +1044,20 @@ emittance (CellFace t i (V4 ir ig ib il)) =
 		e = cellLight t
 		V4 mr mg mb _ = cellColor t
 
-quads :: (CellCoordinate, [CellFace]) -> [(Color4 GLfloat, Normal3 GLfloat, XQuad (V3 GLfloat))]
-quads (c, fs) = fmap quad fs
+quads :: Map CellCoordinate Cell -> (CellCoordinate, [CellFace]) -> [(Color4 GLfloat, Normal3 GLfloat, XQuad (V3 GLfloat))]
+quads w (c, fs) = fmap quad fs
 	where
 		quad f@(CellFace _ i _) =
 			(	toColor $ faceColor f
 			,	toNormal $ ns !! i
-			,	fmap (lattice c +) . fst $ faces !! i
+			,	quadify .
+					fmap (uncurry (+)) .
+						zip (points . fmap (\i -> matDeform w c i) $ q) $
+							points $ fmap ((lattice c +) . v) q
 			)
+			where
+				q = fst $ faces !! i
+				quadify (a:b:c:d:_) = XQuad a b c d
 
 geometry :: Map CellCoordinate Cell -> Map CellCoordinate [CellFace]
 geometry m = Map.mapWithKey visibleFaces m
@@ -1103,7 +1114,7 @@ lightFrom w (lc, lfs) c f@(CellFace t i irradiance) =
 							,	show $ Map.lookup hit w
 							]-}
 				where
-					lightCentroid = (lattice lc +) . centroid . points . fst $ faces !! li
+					lightCentroid = (lattice lc +) . centroid . points . fmap v . fst $ faces !! li
 					-- ignore light hits on the back of the face (where the dot product is positive)
 					θ = (min 1 . abs . min 0) $ n `dot` normalize diff
 					diff = targetCentroid - lightCentroid -- from the light, towards the target
@@ -1111,4 +1122,49 @@ lightFrom w (lc, lfs) c f@(CellFace t i irradiance) =
 					d = 4 * (1 / (dist * dist))
 					dist = distance targetCentroid lightCentroid
 			n = ns !! i
-			targetCentroid = (lattice c +) . centroid . points . fst $ faces !! i
+			targetCentroid = (lattice c +) . centroid . points . fmap v . fst $ faces !! i
+
+-- as in, these vertices represent the same lattice points
+sharedVertices :: [[(Integer, CellCoordinate)]]
+sharedVertices =
+	[	[(0,V3 0 0 0),(3,V3 0 (-1) 0),(5,V3 0 0 (-1)),(6,V3 (-1) 0 0)]
+	,	[(1,V3 0 0 0),(2,V3 (-1) 0 1),(4,V3 (-1) 1 0),(7,V3 (-1) 0 0)]
+	,	[(2,V3 0 0 0),(1,V3 1 0 (-1)),(4,V3 0 1 (-1)),(7,V3 0 0 (-1))]
+	,	[(3,V3 0 0 0),(0,V3 0 1 0),(5,V3 0 1 (-1)),(6,V3 (-1) 1 0)]
+	,	[(4,V3 0 0 0),(1,V3 1 (-1) 0),(2,V3 0 (-1) 1),(7,V3 0 (-1) 0)]
+	,	[(5,V3 0 0 0),(0,V3 0 0 1),(3,V3 0 (-1) 1),(6,V3 (-1) 0 1)]
+	,	[(6,V3 0 0 0),(0,V3 1 0 0),(3,V3 1 (-1) 0),(5,V3 1 0 (-1))]
+	,	[(7,V3 0 0 0),(1,V3 1 0 0),(2,V3 0 0 1),(4,V3 0 1 0)]
+	,	[(8,V3 0 0 0),(9,V3 1 (-1) (-1)),(10,V3 1 0 (-1)),(11,V3 0 (-1) 0),(12,V3 1 (-1) 0),(13,V3 0 0 (-1))]
+	,	[(9,V3 0 0 0),(8,V3 (-1) 1 1),(10,V3 0 1 0),(11,V3 (-1) 0 1),(12,V3 0 0 1),(13,V3 (-1) 1 0)]
+	,	[(10,V3 0 0 0),(8,V3 (-1) 0 1),(9,V3 0 (-1) 0),(11,V3 (-1) (-1) 1),(12,V3 0 (-1) 1),(13,V3 (-1) 0 0)]
+	,	[(11,V3 0 0 0),(8,V3 0 1 0),(9,V3 1 0 (-1)),(10,V3 1 1 (-1)),(12,V3 1 0 0),(13,V3 0 1 (-1))]
+	,	[(12,V3 0 0 0),(8,V3 (-1) 1 0),(9,V3 0 0 (-1)),(10,V3 0 1 (-1)),(11,V3 (-1) 0 0),(13,V3 (-1) 1 (-1))]
+	,	[(13,V3 0 0 0),(8,V3 0 0 1),(9,V3 1 (-1) 0),(10,V3 1 0 0),(11,V3 0 (-1) 1),(12,V3 1 (-1) 1)]
+	]
+
+pushVectors :: CellCoordinate -> Int -> [(CellCoordinate, V3 GLfloat)]
+pushVectors c i = zip
+	((c +) <$> fmap snd (sharedVertices !! i)) $
+	(subtract $ v i) <$> (fmap (lattice . snd) $ sharedVertices !! i)
+
+matDeform :: Map CellCoordinate Cell -> CellCoordinate -> Int -> V3 GLfloat
+matDeform m c i = jitter + push
+	where
+		jitter = evalRand (do
+			-- todo: generate a length-one vector that's actually statistically random wrt direction of angle
+			x' <- getRandomR (-1, 1)
+			y' <- getRandomR (-1, 1)
+			z' <- getRandomR (-1, 1)
+			return $ normalize (V3 x' y' z') ^* j
+			) $ rc (lattice c + v i)
+		rc (V3 x y z) = mkStdGen $
+			sum [(round x + 17) * 3433, (round y + 19) * 3449, (round z + 23) * 3457]
+		j = clamp 0 1 . average . fmap (maybe 0 (\(Cell t) -> cellVariance t)) $ cells
+		push = sum .
+			fmap (uncurry (*^) . first (maybe 0 (\(Cell t) -> cellPush t) . (`Map.lookup` m))) $
+				pushVectors c i
+		cells = fmap ((`Map.lookup` m) . fst) $ pushVectors c i
+
+average :: Fractional a => [a] -> a
+average vs = sum vs / genericLength vs

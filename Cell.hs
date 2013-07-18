@@ -6,6 +6,8 @@ module Cell
 	,	cellColor
 	,	cellLight
 	,	cellContour
+	,	cellPush
+	,	cellVariance
 	,	isTranslucent
 	,	isTransparent
 	,	isOpaque
@@ -64,6 +66,24 @@ cellContour (Crystal _ _) =
 	,	[144, 128,  96, 160]
 	]
 -}
+
+cellPush :: CellType -> Float
+cellPush Air = 0.75
+cellPush Gold = 0.90
+cellPush Dirt = 0.80
+cellPush Rock = 0.90
+cellPush (Crystal _ _) = 1
+cellPush _ = 1
+
+cellVariance :: CellType -> Float
+cellVariance Air = 0.25
+cellVariance Dirt = 0.25
+cellVariance Rock = 0.1
+cellVariance Gold = 0.1
+cellVariance (Crystal _ _) = 0.1
+cellVariance WhiteCell = -6.0
+cellVariance RedCell = -6.0
+cellVariance _ = 0
 
 blockingFace :: Maybe Cell -> Bool
 blockingFace Nothing = True -- if False then unloaded cells act like air cells (i.e., they generate adjacent faces) whereas for the most part they should _not_, since cells on the edges of the map should (ideally) never be visible
