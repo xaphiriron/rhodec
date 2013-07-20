@@ -11,8 +11,8 @@
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
-import Control.Arrow ((***), (&&&), first, second)
-import Control.Monad ((=<<), join, liftM, unless, replicateM, replicateM_, when, ap)
+import Control.Arrow ((***))
+import Control.Monad ((=<<), join, liftM, unless, replicateM, replicateM_)
 import Control.Monad.STM
 import Control.Exception (evaluate)
 import System.Clock
@@ -22,8 +22,8 @@ import Control.Monad.Random
 import Control.Lens
 import Control.Applicative (Applicative(..), pure, (<*>), (<$>))
 import Data.Function (on)
-import Data.List (sortBy, group, groupBy, mapAccumR, transpose, elemIndex, genericLength)
-import Data.Maybe (catMaybes, mapMaybe, catMaybes, isNothing, fromMaybe, listToMaybe)
+import Data.List (sortBy)
+import Data.Maybe (mapMaybe)
 import Data.Ratio ((%))
 import Data.Monoid
 import Data.Map (Map)
@@ -43,9 +43,7 @@ import Linear.V3
 import Linear.V4
 import Linear.Vector((^+^), (^-^), (^*), (*^), lerp)
 
-import LSystem hiding ((^*^))
-import qualified LSystem ((^*^))
-
+import LSystem
 import Cell
 import Lattice
 
@@ -409,8 +407,6 @@ render c t = do
 	(GL.matrix (Just $ Modelview 0) $=) =<< cameraPositionMatrix (c ^. camera)
 	GL.translate (GL.Vector3 0.0 0.0 (-7.0) :: GL.Vector3 GLfloat)
 	m <- GL.getMatrixComponents RowMajor =<< (GL.get (GL.matrix . Just $ GL.Modelview 0) :: IO (GLmatrix GLfloat))
-
-	let thd (a, b, c) = c
 	let w = c ^. world
 	sequence_ .
 		fmap drawQuad .
@@ -480,6 +476,7 @@ glfwEnd = do
 	GLFW.closeWindow
 	GLFW.terminate
 
+-- for a while this kept two states with the idea of interpolating between them on rendering steps. in practice, on my test machine, the framerate was never ever fast enough to warrant that, and i kind of suspected it added a huge memory overhead. note the commented-out code for maintaining state and state'
 main = do
 	r <- getStdGen
 	let (baseMap, _) = genWorld r
