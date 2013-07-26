@@ -54,8 +54,8 @@ instance Num TimeSpec where
 	negate t = t * TimeSpec (-1) 0
 	abs t =
 		case signum t of
-			-1 -> negate t
-			_ -> t
+			s	|	s < 0 -> negate t
+				|	otherwise -> t
 	signum (TimeSpec s us) = fromIntegral $ signum s
 	fromInteger x =
 		uncurry TimeSpec .
