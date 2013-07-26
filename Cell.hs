@@ -18,9 +18,9 @@ import Linear.V4
 import Linear.V3
 
 data CellType = Air | Dirt | Rock | Gold | Crystal Float (V3 Float) | WhiteCell | RedCell
-	deriving (Eq, Show, Read)
+	deriving (Show, Read, Eq, Ord)
 data Cell = Cell CellType
-	deriving (Eq, Show, Read)
+	deriving (Show, Read, Eq)
 
 type CellCoordinate = V3 Int
 
@@ -68,10 +68,10 @@ cellContour (Crystal _ _) =
 -}
 
 cellPush :: CellType -> Float
-cellPush Air = 0.75
-cellPush Gold = 0.90
-cellPush Dirt = 0.80
-cellPush Rock = 0.90
+cellPush Air = 0.5
+cellPush Gold = 0.9
+cellPush Dirt = 0.7
+cellPush Rock = 0.8
 cellPush (Crystal _ _) = 1
 cellPush _ = 1
 
@@ -81,8 +81,6 @@ cellVariance Dirt = 0.25
 cellVariance Rock = 0.1
 cellVariance Gold = 0.1
 cellVariance (Crystal _ _) = 0.1
-cellVariance WhiteCell = -6.0
-cellVariance RedCell = -6.0
 cellVariance _ = 0
 
 blockingFace :: Maybe Cell -> Bool

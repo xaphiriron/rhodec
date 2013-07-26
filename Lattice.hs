@@ -12,7 +12,8 @@ module Lattice
 	) where
 
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import Data.List (group, elemIndex, genericLength)
+import Data.List (group, elemIndex, genericLength, groupBy, sortBy)
+import Data.Function (on)
 import Control.Arrow (first, second)
 import Control.Applicative ((<$>), (<*>), pure)
 import Control.Monad (liftM, ap)
@@ -337,29 +338,42 @@ quadNormal (XQuad v0 v1 _ v3) = normalize $ (v1 - v0) `cross` (v3 - v0)
 quadPlane :: XQuad (V3 Float) -> Int -> Plane Float
 quadPlane q@(XQuad v0 _ _ _) i = Plane (ns !! i) v0
 
+-- the vectors: point FROM the given point TO the center of the adjacent cell. so really they're more like pullVectors, as in, the higher the cellPush type contant the more the vertex is pulled towards the center of the given vertex
 pushVectors :: CellCoordinate -> Int -> [(CellCoordinate, V3 GLfloat)]
 pushVectors c i = zip
 	((c +) <$> fmap snd (sharedVertices !! i)) $
-	subtract (v i) <$> fmap (lattice . snd) (sharedVertices !! i)
+	(-) (v i) <$> fmap (lattice . snd) (sharedVertices !! i)
 
 matDeform :: Map CellCoordinate Cell -> CellCoordinate -> Int -> V3 GLfloat
-matDeform m c i = jitter + push
+matDeform m c i = noise + smooth
 	where
-		jitter = evalRand (do
+		noise = evalRand (do
 			-- todo: generate a length-one vector that's actually statistically random wrt direction of angle
 			x' <- getRandomR (-1, 1)
 			y' <- getRandomR (-1, 1)
 			z' <- getRandomR (-1, 1)
 			return $ normalize (V3 x' y' z') ^* j
 			) $ rc (lattice c + v i)
-		rc (V3 x y z) = mkStdGen $
-			sum [(round x + 17) * 3433, (round y + 19) * 3449, (round z + 23) * 3457]
-		j = clamp 0 1 . average . fmap (maybe 0 (\(Cell t) -> cellVariance t)) $ cells
-		push = sum .
-			fmap (uncurry (*^) . first (maybe 0 (\(Cell t) -> cellPush t) . (`Map.lookup` m))) $
-				pushVectors c i
-		cells = fmap ((`Map.lookup` m) . fst) $ pushVectors c i
-
+			where
+				rc (V3 x y z) = mkStdGen $
+					sum [(round x + 17) * 3433, (round y + 19) * 3449, (round z + 23) * 3457]
+				j = clamp 0 1 . average . fmap (maybe 0 (\(Cell t) -> cellVariance t)) $ cells
+				cells = fmap ((`Map.lookup` m) . fst) $ pushVectors c i
+		smooth =
+			sum . fmap typePush .
+				groupBy ((==) `on` fst) .
+					sortBy (compare `on` fst) $
+						cells
+			where
+				cells =
+					fmap (first $ maybe Air (\(Cell t) -> t) . (`Map.lookup` m)) $
+						pushVectors c i
+				l = genericLength cells
+				typePush :: [(CellType, V3 Float)] -> V3 Float
+				typePush [] = 0
+				typePush (v@(t,_):vs) = (cellPush t *^) . (c *^) . (/ l) . sum . fmap snd $ v:vs
+					where
+						c = genericLength vs + 1
 
 -- this is a RGBA color, for use in actually coloring the face in OpenGL.
 faceColor :: CellFace -> V4 Float

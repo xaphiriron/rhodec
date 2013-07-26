@@ -4,8 +4,15 @@ TODO:
    things like keyconfigs come into play
  * LIGHTING
    * something like 1/4th of the total lighting time/memory is taken up by
-     calls to `turns` and `pointInQuad`
-   * also lighting is horrifically slow (as one might expect)
+     calls to `turns` and `pointInQuad` (and, once i start calling
+     `quadNormal`, that too) so if there's any way at all to make those
+     more efficient i should do that
+     * also lighting is horrifically slow (as one might expect)
+   * i'm using precomputed face normals for lighting calcs; now that there's
+     face deformation they're really obviously incorrect. this is a little
+     complex though, b/c to _not_ use precalculated face normals i have to
+     do the geometry projection before i do all the lighting, whereas now
+     i'm doing it afterwards
    * consider doing a flood rayout out from each lit face instead of having
      every single visible face in the world raycast to every light. bonus:
      built-in cap for how many faces each light has to check
@@ -17,6 +24,8 @@ TODO:
      point based on the surrounding cell types (currently this happens but
      only for 4pt quads, whereas i'd like to change the fundamental geometry
      to a radial triangle fan)
+     * face-based deformation for the centers of cells
+     * edge-based deformation, for the middles of edges
  * L-SYSTEMS
    * l-systems that anchor to lattice points
    * l-systems that react to the environment when they grow
