@@ -3,6 +3,7 @@ module Cell
 	,	Cell(..)
 	,	CellCoordinate(..)
 	,	CellFace(..)
+	,	cellType
 	,	cellColor
 	,	cellLight
 	,	cellContour
@@ -27,6 +28,9 @@ type CellCoordinate = V3 Int
 -- type, face index (from faces), total irradiance (i.e., NOT emittance)
 data CellFace = CellFace CellType Int (V4 Float)
 	deriving (Show, Read, Eq)
+
+cellType :: Cell -> CellType
+cellType (Cell t) = t
 
 cellColor :: CellType -> V4 Float
 cellColor Air = V4 0 0 0 0

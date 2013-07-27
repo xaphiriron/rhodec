@@ -232,12 +232,11 @@ ijk (V3 i j k) =
 toVertex :: V3 a -> GL.Vertex3 a
 toVertex (V3 x y z) = GL.Vertex3 x y z
 
-drawQuad :: (Color4 GLfloat, GL.Normal3 GLfloat, XQuad (V3 GLfloat)) -> IO ()
-drawQuad (c, n, XQuad v0 v1 v2 v3) = do
+drawQuad :: (Color4 GLfloat, XQuad (V3 GLfloat)) -> IO ()
+drawQuad (c, XQuad v0 v1 v2 v3) = do
 	GL.materialAmbientAndDiffuse GL.Front $= c
 	GL.color c
-	GL.renderPrimitive Quads $ do
-		GL.normal n
+	GL.renderPrimitive TriangleFan $ do
 		GL.vertex $ toVertex v0
 		GL.vertex $ toVertex v1
 		GL.vertex $ toVertex v2
@@ -436,6 +435,7 @@ glfwInit eventsW = do
 	GL.lighting $= Disabled
 	GL.blend $= GL.Enabled
 	GL.blendFunc $= (GL.SrcAlpha, GL.OneMinusSrcAlpha)
+	GL.polygonMode $= (GL.Fill, GL.Fill)
 	GL.cullFace $= Just GL.Back
 	GL.clearColor $= Color4 0.6 1.0 0.0 0
 

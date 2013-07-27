@@ -19,6 +19,9 @@ TODO:
    * i have this idea of having a separate lighting thread that constantly
      runs until it reaches equilibria, only resuming when blocks are altered,
      but idk how well that would work
+ * GRAPHICS
+   * i'm still using immediate mode for opengl rendering. this is a very bad
+     idea. switch over to vbos.
  * GEOMETRY
    * subdivide visible cells (from 4 pts to 9 pts, at least) and deform each
      point based on the surrounding cell types (currently this happens but
