@@ -396,12 +396,12 @@ pointInQuad' q@(XQuad _ v0 v1 v2 v3) i p = fmap (turns $ project2d p) lines
 		lines = zip (points flat) (rotate 1 $ points flat)
 			where
 				flat = fmap project2d q
-		(V3 nx ny nz) = ns !! i
+		(V3 nx ny nz) = fmap abs $ ns !! i
 		project2d =
-			case maximum $ fmap abs [nx, ny, nz] of
-				m	|	m == abs nx -> \(V3 _ y z) -> V2 y z
-					|	m == abs ny -> \(V3 x _ z) -> V2 z x
-					|	m == abs nz -> \(V3 x y _) -> V2 x y
+			case maximum [nx, ny, nz] of
+				m	|	m == nx -> \(V3 _ y z) -> V2 y z
+					|	m == ny -> \(V3 x _ z) -> V2 z x
+					|	m == nz -> \(V3 x y _) -> V2 x y
 
 rotate :: Int -> [a] -> [a]
 rotate n xs
