@@ -89,7 +89,7 @@ drainTChan cs = do
 
 data World = World
 	{	_cells :: Map CellCoordinate Cell
-	,	_storedGeometry :: [(CellCoordinate, [CellFace])]
+	,	_storedGeometry :: [(CellCoordinate, [CellFaceQ])]
 	}
 type Generator = Map (V3 Int) (Maybe GeneratorState)
 
@@ -232,10 +232,12 @@ ijk (V3 i j k) =
 toVertex :: V3 a -> GL.Vertex3 a
 toVertex (V3 x y z) = GL.Vertex3 x y z
 
-drawQuad :: (Color4 GLfloat, XQuad (V3 GLfloat)) -> IO ()
-drawQuad (c, XQuad v0 v1 v2 v3) = do
-	GL.materialAmbientAndDiffuse GL.Front $= c
-	GL.color c
+toColor :: V4 a -> GL.Color4 a
+toColor (V4 r g b a) = GL.Color4 r g b a
+
+drawQuad :: CellFaceQ -> IO ()
+drawQuad f@(CellFace t _ _ (XQuad _ v0 v1 v2 v3)) = do
+	GL.color . toColor $ faceColor f
 	GL.renderPrimitive TriangleFan $ do
 		GL.vertex $ toVertex v0
 		GL.vertex $ toVertex v1
@@ -410,7 +412,7 @@ render c t = do
 	sequence_ .
 		fmap drawQuad .
 			join .
-				fmap (quads $ w ^. cells) $
+				fmap snd $
 					_storedGeometry w
 	GLFW.swapBuffers
 

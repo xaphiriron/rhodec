@@ -3,19 +3,20 @@ module Lattice
 	,	WorldSpace(..)
 	,	Side(..)
 	,	Face(..)
+	,	CellFaceQ(..)
 	,	lattice
 	,	unlattice
 	,	collide
 	,	geometry
-	,	quads
 	,	lighting
+	,	faceColor
 	) where
 
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.List (group, elemIndex, genericLength, groupBy, sortBy, nub)
 import Data.Function (on)
 import Control.Arrow (first, second, (&&&))
-import Control.Applicative ((<$>), (<*>), pure)
+import Control.Applicative (Applicative, (<$>), (<*>), pure)
 import Control.Monad (liftM, ap, join)
 
 import qualified Data.Map as Map
@@ -34,13 +35,26 @@ import Linear.Vector((^*), (*^))
 
 import Cell
 
-data XQuad a = XQuad a a a a
-	deriving (Eq, Show)
+-- normal v0 v1 v2 v3
+data XQuad a = XQuad a a a a a
+	deriving (Show, Eq)
 
 instance Functor XQuad where
-	fmap f (XQuad a b c d) = XQuad (f a) (f b) (f c) (f d)
+	fmap f (XQuad n a b c d) = XQuad (f n) (f a) (f b) (f c) (f d)
+
+instance Applicative XQuad where
+	pure a = XQuad a a a a a
+	(XQuad fn fa fb fc fd) <*> (XQuad n a b c d) =
+		XQuad (fn n) (fa a) (fb b) (fc c) (fd d)
+
+recross :: (Floating a, Epsilon a) => XQuad (V3 a) -> XQuad (V3 a)
+recross (XQuad _ v0 v1 v2 v3) = XQuad n v0 v1 v2 v3
+	where
+		n = normalize $ (v1 - v0) `cross` (v3 - v0)
 
 type WorldSpace = V3 Float
+
+type CellFaceQ = CellFace (XQuad (V3 Float))
 
 -- Face = Face side (index on faces list) (V2 i j, representing a point in the face plane where the axes are (v3 - v0) and (v1 - v0))
 data Side = Front | Back
@@ -84,21 +98,21 @@ ns =
 -}
 faces :: [(XQuad Int, CellCoordinate)]
 faces =
-	[	(XQuad 6 11 7 13, V3   1    0    0 )
-	,	(XQuad 3  9 7 11, V3   0    1    0 )
-	,	(XQuad 7  9 5 13, V3   0    0    1 )
+	[	(XQuad 0 6 11 7 13, V3   1    0    0 )
+	,	(XQuad 0 3  9 7 11, V3   0    1    0 )
+	,	(XQuad 0 7  9 5 13, V3   0    0    1 )
 
-	,	(XQuad 6  8 2 11, V3   1    0  (-1))
-	,	(XQuad 1  9 3 12, V3 (-1)   1    0 )
-	,	(XQuad 5 10 4 13, V3   0  (-1)   1 )
+	,	(XQuad 0 6  8 2 11, V3   1    0  (-1))
+	,	(XQuad 0 1  9 3 12, V3 (-1)   1    0 )
+	,	(XQuad 0 5 10 4 13, V3   0  (-1)   1 )
 
-	,	(XQuad 3 11 2 12, V3   0    1  (-1))
-	,	(XQuad 4  8 6 13, V3   1  (-1)   0 )
-	,	(XQuad 5  9 1 10, V3 (-1)   0    1 )
+	,	(XQuad 0 3 11 2 12, V3   0    1  (-1))
+	,	(XQuad 0 4  8 6 13, V3   1  (-1)   0 )
+	,	(XQuad 0 5  9 1 10, V3 (-1)   0    1 )
 
-	,	(XQuad 2  8 0 12, V3   0    0  (-1))
-	,	(XQuad 0  8 4 10, V3   0  (-1)   0 )
-	,	(XQuad 0 10 1 12, V3 (-1)   0    0 )
+	,	(XQuad 0 2  8 0 12, V3   0    0  (-1))
+	,	(XQuad 0 0  8 4 10, V3   0  (-1)   0 )
+	,	(XQuad 0 0 10 1 12, V3 (-1)   0    0 )
 	]
 
 v :: Int -> V3 GLfloat
@@ -235,7 +249,7 @@ toColor :: V4 a -> GL.Color4 a
 toColor (V4 w x y z) = GL.Color4 w x y z
 
 points :: XQuad a -> [a]
-points (XQuad a b c d) = [a, b, c, d]
+points (XQuad _ a b c d) = [a, b, c, d]
 
 centroid :: (Num a, Fractional a) => [V3 a] -> V3 a
 centroid vs = sum vs / (fromIntegral . length $ vs)
@@ -273,7 +287,8 @@ unlattice (V3 x y z) = fmap round $ V3 ax ay az
 		l2 = y - l1
 		l3 = z - l2
 
--- return the collision faces on the first cell that matches the filter function, along a ray along the given coordinates
+-- return the collision faces on the first cell that matches the filter function, along a ray from the given coordinates
+-- distance cutoff, ray origin, ray angle, filter function
 collide :: Int -> WorldSpace -> V3 Float -> ((Face, Face) -> Bool) -> Maybe (Face, Face)
 -- `drop 1` here to discard the first collision, which is (presumably) with the starting cell and thus has a spurious front-face collison value that's actually backwards behind the start of the ray
 collide l o r f = listToMaybe . filter f . drop 1 . take l $ raycast o r
@@ -346,8 +361,7 @@ raycast' o r c =
 turnsHit ::  WorldSpace -> V3 Float -> CellCoordinate -> Int -> Maybe [Turn]
 turnsHit o r c i = pointInQuad' q i <$> mpoint
 	where
-		q@(XQuad v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
-		n = ns !! i
+		q@(XQuad _ v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
 		mpoint = fmap (\t -> o + (r ^* t)) $ planeLineIntersection (quadPlane q i) o r
 
 quadHit :: WorldSpace -> V3 Float -> CellCoordinate -> Int -> Maybe Face
@@ -356,7 +370,8 @@ quadHit o r c i =
 		then Face c i <$> mside <*> mpoint
 		else Nothing
 	where
-		q@(XQuad v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
+		-- (since we're making this quad from first principles its normal isn't correct + its normal is also gonna be in the normals list)
+		q@(XQuad _ v0 v1 v2 v3) = fmap ((lattice c +) . v) . fst $ faces !! i
 		n = ns !! i
 		mside = case r `dot` n of
 			x	|	x < 0 -> Just Front
@@ -376,7 +391,7 @@ pointInQuad q i p = (== 1) . length . group . filter (/= T) $ pointInQuad' q i p
 
 -- this is side-agnostic; i think the thing is if the dimension dropped is negative then we can flip around the resulting V2s (i.e., V2 z y instead of V2 y z) to get a situation where all Ls means front face hit and all Rs means back face hit. as it is, since we don't, sometimes either can mean either
 pointInQuad' :: (Floating a, Epsilon a, Ord a) => XQuad (V3 a) -> Int -> V3 a -> [Turn]
-pointInQuad' q@(XQuad v0 v1 v2 v3) i p = fmap (turns $ project2d p) lines
+pointInQuad' q@(XQuad _ v0 v1 v2 v3) i p = fmap (turns $ project2d p) lines
 	where
 		lines = zip (points flat) (rotate 1 $ points flat)
 			where
@@ -406,11 +421,13 @@ planeLineIntersection (Plane n o) l0 l1 =
 
 -- this isn't used currently b/c _evidently_ it's kind of expensive. who would have thought.
 quadNormal :: (Floating a, Epsilon a) => XQuad (V3 a) -> V3 a
-quadNormal (XQuad v0 v1 _ v3) = normalize $ (v1 - v0) `cross` (v3 - v0)
+quadNormal (XQuad _ v0 v1 _ v3) = normalize $ (v1 - v0) `cross` (v3 - v0)
 
 -- this becomes Float-specific due to looking up the normal rather than calculating it from scratch
 quadPlane :: XQuad (V3 Float) -> Int -> Plane Float
-quadPlane q@(XQuad v0 _ _ _) i = Plane (ns !! i) v0
+quadPlane q@(XQuad _ v0 _ _ _) i = Plane (ns !! i) v0
+
+-- todo: all the deformation code does the same thing, but the code itself is phrased slightly different in all cases. ideally it should all be almost identical, or even like a typeclass that some Edge Center Vertex data types are instances of. particularly the direction of each pushvector is really confusing since the code to generate them is different in all three cases even though there's no reason for it not to be identical
 
 -- the vectors: point FROM the given point TO the center of the adjacent cell. so really they're more like pullVectors, as in, the higher the cellPush type contant the more the vertex is pulled towards the center of the given vertex
 pushVectors :: CellCoordinate -> Int -> [(CellCoordinate, V3 GLfloat)]
@@ -474,131 +491,132 @@ edgeDeform m c (f, e) = smooth
 			where
 				cells :: [(CellType, V3 Float)]
 				cells =
-					fmap (maybe Air cellType . (`Map.lookup` m) &&& (subtract $ average [e0, e1]) . lattice) $
+					fmap (maybe Air cellType . (`Map.lookup` m) &&& subtract (average [e0, e1]) . lattice) $
 						influencingEdges c (f, e)
 					where
 						(e0, e1) = edge c f e
 				l = genericLength cells
+				-- note that for _vertices_ we weigh pushes based on number of adjacent cells of the same type. here we weigh pushes based on _inverse_ number of adjacent cells of the same type. the reason: basically we just wanted air corners to push in, that's it, that's the whole justification
 				typePush :: [(CellType, V3 Float)] -> V3 Float
 				typePush [] = 0
-				typePush (v@(t,_):vs) = (cellPush t *^) . (c *^) . (/ l) . sum . fmap snd $ v:vs
+				--typePush (v@(t,_):vs) = (cellPush t * c *^) . (/ l) . sum . fmap snd $ v:vs)
+				typePush (v@(t,_):vs) = (cellPush t * c *^) . (/ l) . sum . fmap snd $ v:vs
 					where
-						c = genericLength vs + 1
+						c = genericLength cells - (genericLength vs + 1)
 
 edge :: CellCoordinate -> Int -> Int -> (V3 Float, V3 Float)
 edge c f e =
-	(lattice c + (v $ fp !! e), lattice c + (v $ (rotate 1 fp) !! e))
+	(lattice c + v (fp !! e), lattice c + v (rotate 1 fp !! e))
 	where
 		fp = points . fst $ faces !! f
 
+isEmitting :: CellFace a -> Bool
+isEmitting = (\(V4 _ _ _ l) -> l /= 0) . emittance
+
 -- this is a RGBA color, for use in actually coloring the face in OpenGL.
-faceColor :: CellFace -> V4 Float
-faceColor (CellFace t i (V4 ir ig ib il)) =
+faceColor :: CellFace a -> V4 Float
+faceColor (CellFace t _ (V4 ir ig ib il) _) =
 	((* e) <$> V4 mr mg mb 0) + V4 (mr * ir) (mg * ig) (mb * ib) ma
 	where
 		e = clamp 0 1 $ cellLight t
 		V4 mr mg mb ma = cellColor t
 
 -- this is a RGBL color, for use in calculating more RGBL lighting values.
-emittance :: CellFace -> V4 Float
-emittance (CellFace t i (V4 ir ig ib il)) =
+emittance :: CellFace a -> V4 Float
+emittance (CellFace t _ (V4 ir ig ib il) _) =
 	(* e) <$> V4 mr mg mb 1 + V4 (mr * ir) (mg * ig) (mb * ib) il
 	where
 		e = cellLight t
 		V4 mr mg mb _ = cellColor t
 
--- todo: use edgeDeform to calculate midpoint values, rather than just averaging
-quads :: Map CellCoordinate Cell -> (CellCoordinate, [CellFace]) -> [(GL.Color4 GLfloat, XQuad (V3 GLfloat))]
-quads w (c, fs) = join . fmap quad $ fs
+geometry :: Map CellCoordinate Cell -> Map CellCoordinate [CellFaceQ]
+geometry w = Map.mapWithKey (\c -> fmap (reface c) . visibleFaces c) w
 	where
-		quad :: CellFace -> [(GL.Color4 GLfloat, XQuad (V3 GLfloat))]
-		quad f@(CellFace _ i _) = fmap (\x -> (toColor $ faceColor f, x)) $ subdivide pts c'
+		reface :: CellCoordinate -> CellFace () -> CellFaceQ
+		reface c (CellFace t f l _) =
+			CellFace t f l .
+				recross $
+					XQuad 0 v0 v1 v2 v3
 			where
-				pts =
+				(v0:v1:v2:v3:_) =
 					zipWith (+)
 						(points . fmap (matDeform w c) $ base)
 						(points . fmap ((lattice c +) . v) $ base)
-				base = fst $ faces !! i
-				c' :: V3 Float
-				c' = centroid pts + faceDeform w c i
-				subdivide :: [V3 Float] -> V3 Float -> [XQuad (V3 Float)]
-				subdivide q@(v0:v1:v2:v3:_) o =
-					[	XQuad v0 m0 o m3
-					,	XQuad v1 m1 o m0
-					,	XQuad v2 m2 o m1
-					,	XQuad v3 m3 o m2
-					]
 					where
-						(m0:m1:m2:m3:_) =
-							zipWith (+) (edgeDeform w c <$> ((,) i <$> [0..3])) $
-								zipWith (\a b -> average [a,b]) q (rotate 1 q)
-
-geometry :: Map CellCoordinate Cell -> Map CellCoordinate [CellFace]
-geometry m = Map.mapWithKey visibleFaces m
-	where
-		visibleFaces :: CellCoordinate -> Cell -> [CellFace]
-		visibleFaces coord c = filter visible . cellFaces $ c
+						base = fst $ faces !! f
+		visibleFaces :: CellCoordinate -> Cell -> [CellFace ()]
+		visibleFaces c cell = filter visible . cellFaces $ cell
 			where
-				visible :: CellFace -> Bool
-				visible (CellFace t i _) =
+				visible :: CellFace () -> Bool
+				visible (CellFace t i _ _) =
 					-- i.e., don't generate faces for air cells
 					not (isTransparent t) &&
 						-- True/False here determines if unloaded cells are considered to be solid for geometry-generation purposes. On the whole they shouldn't be (thus True) but sometimes it's useful to see just where the loaded map stops
-						(not . maybe True (\(Cell t) -> isOpaque t) $ adjacent m coord i)
-		cellFaces :: Cell -> [CellFace]
-		cellFaces (Cell t) = CellFace t <$> [0..11] <*> pure (V4 0 0 0 0)
+						(not . maybe True (\(Cell t) -> isOpaque t) $ adjacent w c i)
+				cellFaces :: Cell -> [CellFace ()]
+				cellFaces (Cell t) = CellFace t <$> [0..11] <*> pure (V4 0 0 0 0) <*> pure ()
 
-lighting :: Map CellCoordinate [CellFace] -> Map CellCoordinate [CellFace]
-lighting cs = Map.mapWithKey update cs
+lighting ::  Map CellCoordinate [CellFaceQ] -> Map CellCoordinate [CellFaceQ]
+lighting w = Map.mapWithKey update w
 	where
+		lights :: [(CellCoordinate, CellFaceQ)]
 		lights =
-			fmap (second (filter isEmitting)) .
-				Map.toList .
-					Map.filter (any isEmitting) $
-						cs
-		isEmitting = (\(V4 _ _ _ l) -> l /= 0) . emittance
-		update :: CellCoordinate -> [CellFace] -> [CellFace]
-		update coord = fmap faceUpdate
+			filter (isEmitting . snd) .
+				join .
+					fmap liftSnd .
+						Map.toList .
+							Map.filter (any isEmitting) $
+								w
+		update :: CellCoordinate -> [CellFaceQ] -> [CellFaceQ]
+		update c = fmap qu
 			where
-				faceUpdate :: CellFace -> CellFace
-				faceUpdate c@(CellFace t f _) = CellFace t f . sum $ totalIrradiance (coord, c)
-				totalIrradiance :: (CellCoordinate, CellFace) -> [V4 Float]
-				totalIrradiance = ap (liftM uncurry (lightFrom cs <$> lights)) . pure
+				qu :: CellFaceQ -> CellFaceQ
+				qu f@(CellFace t i l q) = CellFace t i l' q
+					where
+						l' = sum $ totalIrradiance c f
+						totalIrradiance :: CellCoordinate -> CellFaceQ -> [V4 Float]
+						totalIrradiance c f = lightFrom w <$> lights <*> pure c <*> pure f
 
+{- nb: this casts using the lattice-aligned coordinates for every cell.
+   the justification here is that collide/raycast casts through a regular lattice (not a deformed one) because to do otherwise would require more state -- raycast would need the world cell data to generate the deformed lattice -- and a really absurd amount of calculation (i.e., generating all cell walls even for occluded or air faces).
+   consequentially, casting with centroid values from deformed faces introduces error, since you can have sufficiently-deformed faces such that the differences in casting strategies leads to different results, leading to (mostly) black splotches where casting fails where it should suceed.
+-}
 -- idk how to really deal with how this might be lit by multiple faces of the same cell at one time. increasing the number of light sources also increases the power of the lighting. one thing to maybe see if you can include: the angle of the lit _face_ vs. the target face. right now it compares the face normal of the target with the _angle_ of the light, totally ignoring the face normal of the _source_.
-lightFrom :: Map CellCoordinate [CellFace] -> (CellCoordinate, [CellFace]) -> CellCoordinate -> CellFace -> V4 Float
-lightFrom w (lc, lfs) c f@(CellFace t i irradiance) =
+lightFrom :: Map CellCoordinate [CellFaceQ] -> (CellCoordinate, CellFaceQ) -> CellCoordinate -> CellFaceQ -> V4 Float
+lightFrom w (lc, lf@(CellFace _ li _ _)) c (CellFace _ i _ q@(XQuad n _ _ _ _)) =
 		if lc == c -- don't bother calculating self-shadowing; it doesn't end well (there are zero-length rays when raycasting)
 			then 0
-			else sum $ fmap light lfs
+			else light
 		where
-			light l@(CellFace lt li _) =
-				-- cast from the light to the target (p.s. i don't think the normalization is needed)
+			light =
+				-- cast from the light to the target
 				case collide 50 lightCentroid diff (hitVisibleFace w) of
 					Nothing -> 0
 					Just f@(Face hit _ _ _, _)
-						|	hit == c -> d * θ *^ emittance l
-						|	otherwise -> 0 {-error $ unwords
-							[	show lc
-							,	show c
-							,	show $ normalize diff
-							,	show lightCentroid
-							,	show targetCentroid
-							,	show f
-							,	show $ Map.lookup hit w
-							]-}
+						|	hit == c -> d * θ *^ emittance lf
+						|	otherwise -> 0
 				where
 					lightCentroid = (lattice lc +) . centroid . points . fmap v . fst $ faces !! li
 					-- ignore light hits on the back of the face (where the dot product is positive)
 					θ = (min 1 . abs . min 0) $ n `dot` normalize diff
 					diff = targetCentroid - lightCentroid -- from the light, towards the target
-					-- 4 here is a world space -> coord space lighting transform constant (since each rhodec is 4~ wide)
+					-- 4 here is a world space -> coord space lighting transform constant (since each rhodec is 4~ world-space units wide)
 					d = 4 * (1 / (dist * dist))
 					dist = distance targetCentroid lightCentroid
-			n = ns !! i
 			targetCentroid = (lattice c +) . centroid . points . fmap v . fst $ faces !! i
 
-hitVisibleFace :: Map CellCoordinate [CellFace] -> (Face, Face) -> Bool
-hitVisibleFace w (Face c f _ _, _) = case Map.lookup c w of
-	Nothing -> True
-	Just fs -> any (\(CellFace _ cf _) -> f == cf) fs
+liftSnd :: Monad m => (a, m b) -> m (a, b)
+liftSnd (a, mb) = do
+	b <- mb
+	return (a, b)
+
+liftFst :: Monad m => (m a, b) -> m (a, b)
+liftFst (ma, b) = do
+	a <- ma
+	return (a, b)
+
+hitVisibleFace :: Map CellCoordinate [CellFaceQ] -> (Face, Face) -> Bool
+hitVisibleFace w (Face c f _ _, _) =
+	case Map.lookup c w of
+		Nothing -> True
+		Just fs -> any (\(CellFace _ cf _ _) -> f == cf) fs

@@ -26,8 +26,11 @@ data Cell = Cell CellType
 type CellCoordinate = V3 Int
 
 -- type, face index (from faces), total irradiance (i.e., NOT emittance)
-data CellFace = CellFace CellType Int (V4 Float)
+data CellFace a = CellFace CellType Int (V4 Float) a
 	deriving (Show, Read, Eq)
+
+instance Functor CellFace where
+	fmap f (CellFace t i l a) = CellFace t i l (f a)
 
 cellType :: Cell -> CellType
 cellType (Cell t) = t
