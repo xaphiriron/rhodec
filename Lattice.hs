@@ -407,7 +407,7 @@ faceColor (CellFace t _ (V4 ir ig ib il) _) =
 -- this is a RGBL color, for use in calculating more RGBL lighting values.
 emittance :: CellFace a -> V4 Float
 emittance (CellFace t _ (V4 ir ig ib il) _) =
-	(* e) <$> V4 mr mg mb 1 + V4 (mr * ir) (mg * ig) (mb * ib) il
+	((* e) <$> V4 mr mg mb 1) + V4 (mr * ir) (mg * ig) (mb * ib) il
 	where
 		e = cellLight t
 		V4 mr mg mb _ = cellColor t
