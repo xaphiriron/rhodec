@@ -457,24 +457,27 @@ lightFrom :: Map RD.Coordinate [CellFaceQ] -> (RD.Coordinate, CellFaceQ) -> RD.C
 lightFrom w (lc, lf@(CellFace _ li _ _)) c (CellFace _ i _ q@(XQuad n _ _ _ _)) =
 		if lc == c -- don't bother calculating self-shadowing; it doesn't end well (there are zero-length rays when raycasting)
 			then 0
-			else light
+			else
+				-- don't even bother colliding if this is distant enough to be weak. note: "weakness" in proper radiosity terms is not a fixed quantity, so when multiple passes become a thing this should be checked again (b/c then "weakness" can we revised upwards b/c there's a lot more total light in the scene)
+				if (\(V4 _ _ _ l) -> l) light < 0.0125
+					then 0
+					else
+						-- cast from the light to the target
+						case collide 50 lightCentroid diff (hitVisibleFace w) of
+							Nothing -> 0
+							Just f@(Face hit _ _ _, _)
+								|	hit == c -> light
+								|	otherwise -> 0
 		where
-			light =
-				-- cast from the light to the target
-				case collide 50 lightCentroid diff (hitVisibleFace w) of
-					Nothing -> 0
-					Just f@(Face hit _ _ _, _)
-						|	hit == c -> d * θ *^ emittance lf
-						|	otherwise -> 0
-				where
-					lightCentroid = (lattice lc +) . centroid . points . fmap v . fst $ faces !! li
-					-- ignore light hits on the back of the face (where the dot product is positive)
-					θ = (min 1 . abs . min 0) $ n `dot` normalize diff
-					diff = targetCentroid - lightCentroid -- from the light, towards the target
-					-- 4 here is a world space -> coord space lighting transform constant (since each rhodec is 4~ world-space units wide)
-					d = 4 * (1 / (dist * dist))
-					dist = distance targetCentroid lightCentroid
-			targetCentroid = (lattice c +) . centroid . points . fmap v . fst $ faces !! i
+			light = d * θ *^ emittance lf
+			lightCentroid = (RD.lattice lc +) . centroid . points . fmap v . fst $ faces !! li
+			-- ignore light hits on the back of the face (where the dot product is positive)
+			θ = (min 1 . abs . min 0) $ n `dot` normalize diff
+			diff = targetCentroid - lightCentroid -- from the light, towards the target
+			-- 4 here is a world space -> coord space lighting transform constant (since each rhodec is 4~ world-space units wide)
+			d = 4 * (1 / (dist * dist))
+			dist = distance targetCentroid lightCentroid
+			targetCentroid = (RD.lattice c +) . centroid . points . fmap v . fst $ faces !! i
 
 liftSnd :: Monad m => (a, m b) -> m (a, b)
 liftSnd (a, mb) = do
