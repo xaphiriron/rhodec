@@ -537,26 +537,44 @@ main = do
 	glfwEnd
 	where
 		genWorld = runRand $ do
-			g <- getSplit
-			let (hull, g') = rect 8 8 8
+			hull <- rander $ rect 8 8 8
 				[	(Dirt, 1 % 2)
 				,	(Rock, 1 % 2)
 				,	(Gold, 1 % 32)
-				] g
-			let (inside, g'') = rect 6 6 6
+				]
+			inside <- rander $ sphere 6
 				[	(Air, 1 % 1)
-				] g'
-			let (pillar, _) = rect 8 1 1
+				]
+			pillar <- rander $ rect 8 1 1
 				[	(RedCell, 1 % 3)
 				,	(WhiteCell, 2 % 3)
-				] g''
+				]
+
+			g <- getSplit
+			hole <- rander $ rect 1 6 1
+				[	(Air, 1 % 1)
+				]
+			let sndRoom =
+					mconcat
+						[	shift (ijk $ V3 1 1 1) .
+								fst $ rect 6 6 6
+								[	(Air, 1 % 1)
+								] g
+						,	fst $ rect 8 8 8
+							[	(Dirt, 1 % 2)
+							,	(Rock, 1 % 2)
+							,	(Gold, 1 % 32)
+							] g
+						]
 			return $ mconcat
-				[	shift (ijk $ V3 0 5 2) pillar
+				[	shift (ijk $ V3 4 6 4) hole
+				,	shift (ijk $ V3 0 8 0) sndRoom
+				,	shift (ijk $ V3 0 5 2) pillar
 				,	shift (ijk $ V3 0 5 5) pillar
 				,	shift (ijk $ V3 0 2 5) pillar
 				,	shift (ijk $ V3 0 2 2) pillar
-				,	shift (ijk $ V3 4 4 4) $
-						Map.singleton (V3 0 0 0) (Cell $ Crystal 6 (V3 0.8 0.9 1.0))
+				,	shift (ijk $ V3 5 4 4) $
+						Map.singleton (V3 0 0 0) (Cell $ Crystal 2 (V3 1.0 0.4 0.2))
 				,	shift (ijk $ V3 1 1 1) inside
 				,	hull
 				]
@@ -573,6 +591,12 @@ weightedList gen weights = evalRand m gen
 
 shift :: RD.Coordinate -> Map RD.Coordinate Cell -> Map RD.Coordinate Cell
 shift o = Map.mapKeys (+ o)
+
+rander :: RandomGen g => (g -> (a, g)) -> Rand g a
+rander f = do
+	g <- getSplit
+	let a = fst $ f g
+	return a
 
 -- todo: return the new random param by extracting a finite number of random values
 rect :: RandomGen g => Int -> Int -> Int -> [(Material, Rational)] -> g -> (Map RD.Coordinate Cell, g)
