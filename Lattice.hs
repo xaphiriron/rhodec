@@ -10,6 +10,7 @@ module Lattice
 	,	faceColor
 	) where
 
+import Data.Tuple (swap)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.List (group, elemIndex, genericLength, groupBy, sortBy, nub)
 import Data.Function (on)
@@ -35,6 +36,7 @@ import Cell
 import Material(Material(..))
 import qualified Material
 import qualified RhoDec as RD
+import qualified TetOct as TO
 
 -- normal v0 v1 v2 v3
 data XQuad a = XQuad a a a a a
@@ -191,6 +193,16 @@ adjacentCells w = fmap (`Map.lookup` w) . adjacentFaces
 adjacent :: Map RD.Coordinate Cell -> RD.Coordinate -> Int -> Maybe Cell
 adjacent w c i = (`Map.lookup` w) . (c +) . snd $ faces !! i
 
+
+toRhombic :: TO.Coordinate -> [(RD.Coordinate, Int)]
+toRhombic toc =
+	fmap (first (rc +) . swap) $ sharedVertices !! 10
+	where
+		rc = RD.unlatticeI . (subtract $ v 10) . TO.lattice $ toc
+
+toTetOct :: RD.Coordinate -> Int -> TO.Coordinate
+toTetOct rc i =
+	TO.unlattice $ RD.lattice rc + v i
 
 -- return the collision faces on the first cell that matches the filter function, along a ray from the given coordinates
 -- distance cutoff, ray origin, ray angle, filter function
