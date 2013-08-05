@@ -45,6 +45,8 @@ import Linear.Vector((^+^), (^-^), (^*), (*^), lerp)
 
 import LSystem
 import Cell
+import Material (Material(..))
+import qualified Material
 import qualified RhoDec as RD
 import Lattice
 
@@ -559,10 +561,10 @@ main = do
 				,	hull
 				]
 
-cube :: Int -> CellType -> Map RD.Coordinate Cell
+cube :: Int -> Material -> Map RD.Coordinate Cell
 cube s t = fst $ rect s s s [(t, 1 % 1)] (mkStdGen 0)
 
-randomCube :: RandomGen g => Int -> [(CellType, Rational)] -> g -> Map RD.Coordinate Cell
+randomCube :: RandomGen g => Int -> [(Material, Rational)] -> g -> Map RD.Coordinate Cell
 randomCube s ts r = fst $ rect s s s ts r
 
 weightedList :: RandomGen g => g -> [(a, Rational)] -> [a]
@@ -573,7 +575,7 @@ shift :: RD.Coordinate -> Map RD.Coordinate Cell -> Map RD.Coordinate Cell
 shift o = Map.mapKeys (+ o)
 
 -- todo: return the new random param by extracting a finite number of random values
-rect :: RandomGen g => Int -> Int -> Int -> [(CellType, Rational)] -> g -> (Map RD.Coordinate Cell, g)
+rect :: RandomGen g => Int -> Int -> Int -> [(Material, Rational)] -> g -> (Map RD.Coordinate Cell, g)
 rect i j k ts r =
 	(,)
 		(foldr (uncurry Map.insert) Map.empty $

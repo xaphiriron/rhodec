@@ -32,6 +32,8 @@ import Linear.Epsilon (Epsilon(..))
 import Linear.Vector((^*), (*^))
 
 import Cell
+import Material(Material(..))
+import qualified Material
 import qualified RhoDec as RD
 
 -- normal v0 v1 v2 v3
@@ -351,7 +353,7 @@ matDeform m c i = noise + smooth
 			where
 				rc (V3 x y z) = mkStdGen $
 					sum [(round x + 17) * 3433, (round y + 19) * 3449, (round z + 23) * 3457]
-				j = clamp 0 1 . average . fmap (maybe 0 (cellVariance . cellType)) $ cells
+				j = clamp 0 1 . average . fmap (maybe 0 (Material.variance . cellType)) $ cells
 				cells = fmap ((`Map.lookup` m) . fst) $ pushVectors c i
 		smooth =
 			sum . fmap typePush .
@@ -363,9 +365,9 @@ matDeform m c i = noise + smooth
 					fmap (first $ maybe Air cellType . (`Map.lookup` m)) $
 						pushVectors c i
 				l = genericLength cells
-				typePush :: [(CellType, V3 Float)] -> V3 Float
+				typePush :: [(Material, V3 Float)] -> V3 Float
 				typePush [] = 0
-				typePush (v@(t,_):vs) = (cellPush t *^) . (c *^) . (/ l) . sum . fmap snd $ v:vs
+				typePush (v@(t,_):vs) = (Material.push t *^) . (c *^) . (/ l) . sum . fmap snd $ v:vs
 					where
 						c = genericLength vs + 1
 
@@ -377,16 +379,16 @@ faceColor :: CellFace a -> V4 Float
 faceColor (CellFace t _ (V4 ir ig ib il) _) =
 	((* e) <$> V4 mr mg mb 0) + V4 (mr * ir) (mg * ig) (mb * ib) ma
 	where
-		e = clamp 0 1 $ cellLight t
-		V4 mr mg mb ma = cellColor t
+		e = clamp 0 1 $ Material.light t
+		V4 mr mg mb ma = Material.color t
 
 -- this is a RGBL color, for use in calculating more RGBL lighting values.
 emittance :: CellFace a -> V4 Float
 emittance (CellFace t _ (V4 ir ig ib il) _) =
 	((* e) <$> V4 mr mg mb 1) + V4 (mr * ir) (mg * ig) (mb * ib) il
 	where
-		e = cellLight t
-		V4 mr mg mb _ = cellColor t
+		e = Material.light t
+		V4 mr mg mb _ = Material.color t
 
 -- todo: split this into two functions, one of which is Map RD.Coordinate Cell -> Map TO.Coordinate (V3 Float) and the other is i guess Map RD.Coordinate Cell -> Map.TO.Coordinate (V3 Float) -> Map.RD.Coordinate [CellFaceQ]. but seeing as how that's probably not gonna be _faster_ it's not really high-priority
 geometry :: Map RD.Coordinate Cell -> Map RD.Coordinate [CellFaceQ]
@@ -410,9 +412,9 @@ geometry w = Map.mapWithKey (\c -> fmap (reface c) . visibleFaces c) w
 				visible :: CellFace () -> Bool
 				visible (CellFace t i _ _) =
 					-- i.e., don't generate faces for air cells
-					not (isTransparent t) &&
+					not (Material.isTransparent t) &&
 						-- True/False here determines if unloaded cells are considered to be solid for geometry-generation purposes. On the whole they shouldn't be (thus True) but sometimes it's useful to see just where the loaded map stops
-						(not . maybe True (\(Cell t) -> isOpaque t) $ adjacent w c i)
+						(not . maybe True (Material.isOpaque . cellType) $ adjacent w c i)
 				cellFaces :: Cell -> [CellFace ()]
 				cellFaces (Cell t) = CellFace t <$> [0..11] <*> pure (V4 0 0 0 0) <*> pure ()
 
