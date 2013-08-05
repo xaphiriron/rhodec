@@ -45,6 +45,7 @@ import Linear.Vector((^+^), (^-^), (^*), (*^), lerp)
 
 import LSystem
 import Cell
+import qualified RhoDec as RD
 import Lattice
 
 instance Num TimeSpec where
@@ -88,8 +89,8 @@ drainTChan cs = do
 			liftM (c : ) $ drainTChan cs
 
 data World = World
-	{	_cells :: Map CellCoordinate Cell
-	,	_storedGeometry :: [(CellCoordinate, [CellFaceQ])]
+	{	_cells :: Map RD.Coordinate Cell
+	,	_storedGeometry :: [(RD.Coordinate, [CellFaceQ])]
 	}
 type Generator = Map (V3 Int) (Maybe GeneratorState)
 
@@ -218,7 +219,7 @@ isLoaded w (Face c i s _, _) = case Map.lookup c (w ^. cells) of
 	Nothing -> False
 	_ -> True
 
-isTargetCell :: CellCoordinate -> World -> (Face, Face) -> Bool
+isTargetCell :: RD.Coordinate -> World -> (Face, Face) -> Bool
 isTargetCell tc w (Face c _ _ _, _) = tc == c
 
 ijk :: Num a => V3 a -> V3 a
@@ -353,7 +354,7 @@ distanceSort :: Integral a => WorldSpace -> [(V3 a, b)] -> [(V3 a, b)]
 distanceSort p =
 	reverse . sortBy (compare `on` distance
 		(fmap fromIntegral .
-			unlattice $ p) .
+			RD.unlattice $ p) .
 		fmap fromIntegral .
 			fst)
 
@@ -364,7 +365,7 @@ actionApply (AdjustViewAngle d) s = camera %~ cameraReorient d $ s
 		cameraReorient d (Camera q p) = Camera (reorient d q) p
 actionApply (ManualImpel d) s = -- update camera and optionally resort geometry
 	world . storedGeometry %~
-		(if unlattice op /= unlattice np
+		(if RD.unlattice op /= RD.unlattice np
 			then distanceSort np
 			else id) $ cus
 	where
@@ -558,21 +559,21 @@ main = do
 				,	hull
 				]
 
-cube :: Int -> CellType -> Map CellCoordinate Cell
+cube :: Int -> CellType -> Map RD.Coordinate Cell
 cube s t = fst $ rect s s s [(t, 1 % 1)] (mkStdGen 0)
 
-randomCube :: RandomGen g => Int -> [(CellType, Rational)] -> g -> Map CellCoordinate Cell
+randomCube :: RandomGen g => Int -> [(CellType, Rational)] -> g -> Map RD.Coordinate Cell
 randomCube s ts r = fst $ rect s s s ts r
 
 weightedList :: RandomGen g => g -> [(a, Rational)] -> [a]
 weightedList gen weights = evalRand m gen
 	where m = sequence . repeat . fromList $ weights
 
-shift :: CellCoordinate -> Map CellCoordinate Cell -> Map CellCoordinate Cell
+shift :: RD.Coordinate -> Map RD.Coordinate Cell -> Map RD.Coordinate Cell
 shift o = Map.mapKeys (+ o)
 
 -- todo: return the new random param by extracting a finite number of random values
-rect :: RandomGen g => Int -> Int -> Int -> [(CellType, Rational)] -> g -> (Map CellCoordinate Cell, g)
+rect :: RandomGen g => Int -> Int -> Int -> [(CellType, Rational)] -> g -> (Map RD.Coordinate Cell, g)
 rect i j k ts r =
 	(,)
 		(foldr (uncurry Map.insert) Map.empty $

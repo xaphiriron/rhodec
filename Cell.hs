@@ -23,8 +23,6 @@ data CellType = Air | Dirt | Rock | Gold | Crystal Float (V3 Float) | WhiteCell 
 data Cell = Cell CellType
 	deriving (Show, Read, Eq)
 
-type CellCoordinate = V3 Int
-
 -- type, face index (from faces), total irradiance (i.e., NOT emittance)
 data CellFace a = CellFace CellType Int (V4 Float) a
 	deriving (Show, Read, Eq)
