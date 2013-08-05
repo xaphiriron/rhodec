@@ -589,3 +589,15 @@ rect i j k ts r =
 		jaxis = iterate (+ V3 1 (-1) 1) 0
 		kaxis = iterate (+ V3 (-1) 1 1) 0
 		subplanes = [V3 0 0 0, V3 0 0 1, V3 0 1 0, V3 1 0 0]
+
+sphere :: RandomGen g => Float -> [(Material, Rational)] -> g -> (Map RD.Coordinate Cell, g)
+sphere r ts g = (,)
+	(shift (ijk $ V3 rd rd rd) .
+		Map.filterWithKey (\c _ -> distance 0 (RD.lattice c) < r * 2) .
+			shift (ijk $ V3 (-rd) (-rd) (-rd)) $
+				cs)
+	g'
+	where
+		(cs, g') = rect ri ri ri ts g
+		ri = ceiling r
+		rd = ri `div` 2
