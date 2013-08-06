@@ -407,10 +407,8 @@ render c t = do
 	GL.clear [ColorBuffer, DepthBuffer]
 	GL.matrixMode $= Modelview 0
 	GL.loadIdentity
-	let ic = c ^. camera --interpolate (o ^. camera) (c ^. camera) 0
+	--let ic = interpolate (o ^. camera) (c ^. camera) 0
 	(GL.matrix (Just $ Modelview 0) $=) =<< cameraPositionMatrix (c ^. camera)
-	GL.translate (GL.Vector3 0.0 0.0 (-7.0) :: GL.Vector3 GLfloat)
-	m <- GL.getMatrixComponents RowMajor =<< (GL.get (GL.matrix . Just $ GL.Modelview 0) :: IO (GLmatrix GLfloat))
 	let w = c ^. world
 	sequence_ .
 		fmap drawQuad .
