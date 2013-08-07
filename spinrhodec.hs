@@ -11,7 +11,7 @@
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TChan
-import Control.Arrow ((***))
+import Control.Arrow ((***), first, second)
 import Control.Monad ((=<<), join, liftM, unless, replicateM, replicateM_)
 import Control.Monad.STM
 import Control.Exception (evaluate)
@@ -23,7 +23,7 @@ import Control.Lens
 import Control.Applicative (Applicative(..), pure, (<*>), (<$>))
 import Data.Function (on)
 import Data.List (sortBy)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe, maybeToList)
 import Data.Ratio ((%))
 import Data.Monoid
 import Data.Map (Map)
@@ -48,6 +48,7 @@ import Cell
 import Material (Material(..))
 import qualified Material
 import qualified RhoDec as RD
+import qualified TetOct as TO
 import Lattice
 
 instance Num TimeSpec where
@@ -92,6 +93,7 @@ drainTChan cs = do
 
 data World = World
 	{	_cells :: Map RD.Coordinate Cell
+	,	_deforms :: Map TO.Coordinate (V3 Float)
 	,	_storedGeometry :: [(RD.Coordinate, [CellFaceQ])]
 	}
 type Generator = Map (V3 Int) (Maybe GeneratorState)
@@ -109,6 +111,7 @@ data GeneratorState = GeneratorState
 data GameState = GameState
 	{	_camera :: Camera GLfloat
 	,	_world :: World
+	,	_pointFaces :: Maybe CellFaceQ
 	--,	_generator :: Generator -- this should always be fully populated w/ the 17x17x17 grid surrounding the player. 8 cell blocks, cubic, in all directions. (assuming that the player is always "in" a cell block)
 	,	_quit :: Bool
 	}
@@ -183,9 +186,9 @@ quat2matrix (Quaternion w (V3 x y z)) =
 		,             0,             0,             0,             1
 		]
 
-positionMatrix :: (Num a, MatrixComponent a) => Quaternion a -> V3 a -> IO (GLmatrix a)
+
+positionMatrix :: (Num a) => Quaternion a -> V3 a -> [a]
 positionMatrix (Quaternion w (V3 x y z)) (V3 px py pz) =
-	GL.newMatrix RowMajor
 		[ sx, sy, sz, sum [-px * sx, -py * sy, -pz * sz]
 		, ux, uy, uz, sum [-px * ux, -py * uy, -pz * uz]
 		, fx, fy, fz, sum [-px * fx, -py * fy, -pz * fz]
@@ -201,28 +204,36 @@ positionMatrix (Quaternion w (V3 x y z)) (V3 px py pz) =
 		fy =   2*y*z+2*w*x
 		fz = 1-2*x*x-2*y*y
 
+positionMatrixGL :: (Num a, MatrixComponent a) => Quaternion a -> V3 a -> IO (GLmatrix a)
+positionMatrixGL = liftM (GL.newMatrix RowMajor) . positionMatrix
+
 cameraRotationMatrix :: (Num a, MatrixComponent a) => Camera a -> IO (GLmatrix a)
 cameraRotationMatrix (Camera q _) = quat2matrix q
 
 cameraPositionMatrix :: (Num a, MatrixComponent a) => Camera a -> IO (GLmatrix a)
-cameraPositionMatrix (Camera q v) = positionMatrix q v
+cameraPositionMatrix (Camera q v) = positionMatrixGL q v
+
+front :: Num a => Camera a -> V3 a
+front (Camera q p) = V3 (m !! 8) (m !! 9) (m !! 10)
+	where
+		m = positionMatrix q p
 
 makeLenses ''World
 makeLenses ''GameState
 
 isSolid :: World -> (Face, Face) -> Bool
-isSolid w (Face c i s _, _) = case Map.lookup c (w ^. cells) of
+isSolid w (Face c i s _ _, _) = case Map.lookup c (w ^. cells) of
 	Nothing -> False
 	Just (Cell Air) -> False
 	Just (Cell _) -> True
 
 isLoaded :: World -> (Face, Face) -> Bool
-isLoaded w (Face c i s _, _) = case Map.lookup c (w ^. cells) of
+isLoaded w (Face c i s _ _, _) = case Map.lookup c (w ^. cells) of
 	Nothing -> False
 	_ -> True
 
 isTargetCell :: RD.Coordinate -> World -> (Face, Face) -> Bool
-isTargetCell tc w (Face c _ _ _, _) = tc == c
+isTargetCell tc w (Face c _ _ _ _, _) = tc == c
 
 ijk :: Num a => V3 a -> V3 a
 ijk (V3 i j k) =
@@ -361,8 +372,24 @@ distanceSort p =
 			fst)
 
 actionApply :: UpdateAction -> GameState -> GameState
-actionApply (AdjustViewAngle d) s = camera %~ cameraReorient d $ s
+actionApply (AdjustViewAngle d) s =
+	-- ah yes let's regenerate the entire geometry map every time the mouse moves. this sounds like a great idea. (nb: it's a list in the first place b/c it's depth-sorted, which is actually kind of inaccurate because it's sorted on cell-center rather than on face-center, so there are certain cases (i.e., a lot) where there are still occlusions)
+	(set pointFaces .
+		fmap ((fmap . fmap $ (+) $ 0.01 *^ front (s ^. camera)) . faceQuad) $
+			collide
+				(s ^. world . deforms)
+				50
+				((\(Camera _ p) -> p) $ s ^. camera)
+				((-1) *^ front (s ^. camera))
+				(hitVisibleFace $ Map.fromList $ s ^. world . storedGeometry)
+			{-collide (s ^. world . deforms) 50 ((\(Camera _ p) -> p) $ s ^. camera) ((-1) *^ front (s ^. camera)) $ hitVisibleFace $ Map.fromList $ s ^. world . storedGeometry-}
+			) .
+		(camera %~ cameraReorient d) $
+			s
 	where
+		faceQuad :: (Face, Face) -> CellFaceQ
+		faceQuad (Face c f _ _ d, Face c' f' _ _ d') =
+			CellFace Void f 0 . (d <*>) . fmap ((RD.lattice c +) . v) . fst $ faces !! f
 		cameraReorient :: (RealFloat a) => V2 a -> Camera a -> Camera a
 		cameraReorient d (Camera q p) = Camera (reorient d q) p
 actionApply (ManualImpel d) s = -- update camera and optionally resort geometry
@@ -415,6 +442,16 @@ render c t = do
 			join .
 				fmap snd $
 					_storedGeometry w
+	sequence_ .
+		maybeToList $
+			(\(CellFace _ _ _ (XQuad _ v0 v1 v2 v3)) -> do
+				GL.color (GL.Color4 1.0 1.0 1.0 0.15 :: GL.Color4 Float)
+				GL.renderPrimitive TriangleFan $ do
+					GL.vertex $ toVertex v0
+					GL.vertex $ toVertex v1
+					GL.vertex $ toVertex v2
+					GL.vertex $ toVertex v3
+				return ()) <$> c ^. pointFaces
 	GLFW.swapBuffers
 
 glfwInit :: TChan GLFWEvent -> IO ()
@@ -486,9 +523,10 @@ main = do
 	-- from starting camera position, currently V3 0 0 0
 	let baseWorld = World
 		baseMap
-		(distanceSort (V3 0 0 0) . Map.toList . (!! 1) . iterate lighting . geometry $ baseMap)
-	stateVar <- newTVarIO $ GameState mempty baseWorld False
-	--state'Var <- newTVarIO $ GameState mempty baseWorld False
+		(deformations baseMap)
+		(distanceSort (V3 0 0 0) . Map.toList . (!! 1) . iterate lighting . geometry' baseMap $ deformations baseMap)
+	stateVar <- newTVarIO $ GameState mempty baseWorld Nothing False
+	--state'Var <- newTVarIO $ GameState mempty baseWorld Nothing False
 	events <- newTChanIO
 	lastUpdateVar <- newTVarIO =<<
 		liftM (subtract $ TimeSpec 0 40000000) (getTime Monotonic)

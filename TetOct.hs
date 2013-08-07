@@ -1,7 +1,9 @@
 module TetOct
 	(	Coordinate(..)
+	,	CellType (..)
 	,	lattice
 	,	unlattice
+	,	cellType
 	) where
 
 import Linear.V3

@@ -5,9 +5,15 @@ module Lattice
 	,	Face(..)
 	,	CellFaceQ(..)
 	,	collide
+	,	deformations
 	,	geometry
 	,	lighting
 	,	faceColor
+
+	,	faces
+	,	v
+	,	hitVisibleFace
+	,	raycast
 	) where
 
 import Data.Tuple (swap)
@@ -59,11 +65,10 @@ type WorldSpace = V3 Float
 
 type CellFaceQ = CellFace (XQuad (V3 Float))
 
--- Face = Face side (index on faces list) (V2 i j, representing a point in the face plane where the axes are (v3 - v0) and (v1 - v0))
+-- Face = Face side (index on faces list) (V2 i j, representing a point in the face plane where the axes are (v3 - v0) and (v1 - v0)) (quad deformation data)
 data Side = Front | Back
 	deriving (Show, Read, Eq, Enum, Bounded)
-data Face = Face RD.Coordinate Int Side (V3 Float)
-	deriving (Show, Read, Eq)
+data Face = Face RD.Coordinate Int Side (V3 Float) (XQuad (V3 Float -> V3 Float))
 
 data Turn = L | R | T
 	deriving (Show, Read, Eq, Enum, Bounded)
@@ -227,19 +232,24 @@ toTetOct :: RD.Coordinate -> Int -> TO.Coordinate
 toTetOct rc i =
 	TO.unlattice $ RD.lattice rc + v i
 
--- return the collision faces on the first cell that matches the filter function, along a ray from the given coordinates
--- distance cutoff, ray origin, ray angle, filter function
-collide :: Int -> WorldSpace -> V3 Float -> ((Face, Face) -> Bool) -> Maybe (Face, Face)
--- `drop 1` here to discard the first collision, which is (presumably) with the starting cell and thus has a spurious front-face collison value that's actually backwards behind the start of the ray
-collide l o r f = listToMaybe . filter f . drop 1 . take l $ raycast o r
+deformFace :: Num a => Map TO.Coordinate a -> RD.Coordinate -> Int -> XQuad (a -> a)
+deformFace vw c i =
+	fmap ((+) . fromMaybe 0 . (`Map.lookup` vw) . toTetOct c) .
+		fst $ faces !! i
 
-raycast :: WorldSpace -> V3 Float -> [(Face, Face)]
-raycast o r = raycast' o r $ RD.unlattice o
+-- return the collision faces on the first cell that matches the filter function, along a ray from the given coordinates
+-- deformation data, distance cutoff, ray origin, ray angle, filter function
+collide :: Map TO.Coordinate (V3 Float) -> Int -> WorldSpace -> V3 Float -> ((Face, Face) -> Bool) -> Maybe (Face, Face)
+-- `drop 1` here to discard the first collision, which is (presumably) with the starting cell and thus has a spurious front-face collison value that's actually backwards behind the start of the ray
+collide d l o r f = listToMaybe . filter f . drop 1 . take l $ raycast d o r
+
+raycast :: Map TO.Coordinate (V3 Float) -> WorldSpace -> V3 Float -> [(Face, Face)]
+raycast d o r = raycast' d o r $ RD.unlattice o
 
 -- ray origin -> ray vector -> cell to collide against this try -> [(front face hit, back face hit)]
-raycast' :: WorldSpace -> V3 Float -> RD.Coordinate -> [(Face, Face)]
-raycast' o r c =
-	case rayCollide o r c of
+raycast' :: Map TO.Coordinate (V3 Float) -> WorldSpace -> V3 Float -> RD.Coordinate -> [(Face, Face)]
+raycast' d o r c =
+	case rayCollide of
 		Nothing -> [] {-error $
 			unwords
 				[	"Cast not inside cell bounds:"
@@ -247,47 +257,45 @@ raycast' o r c =
 				,	show r
 				,	show c
 				]-} -- our math is wrong. a mistake has led us here. alternately, the rayCollide function hit a tangent that it couldn't correct for (which is most tangents)
-		Just fs@(_, b) -> fs : raycast' o r (c + adjFaceCell b)
+		Just fs@(_, b) -> fs : raycast' d o r (c + adjFaceCell b)
 	where
-		adjFaceCell :: Face -> V3 Int
-		adjFaceCell (Face _ i _ _) = snd . (faces !!) $ i
-		rayCollide :: WorldSpace -> V3 Float -> RD.Coordinate -> Maybe (Face, Face)
-		rayCollide origin ray cell =
-			case (mf, mb) of
+		adjFaceCell :: Face -> RD.Coordinate
+		adjFaceCell (Face _ i _ _ _) = snd $ faces !! i
+		rayCollide :: Maybe (Face, Face)
+		rayCollide =
+			case (check Front fs, check Back fs) of
 				(Just f, Just b) -> Just (f, b)
-				(Just f@(Face c i _ point), Nothing) ->
+				(Just f@(Face c i _ point _), Nothing) ->
 					{-
 					... if there's ONE T then you're passing through an edge, and you can hit the sole other face that shares that edge
 					... if there're TWO (adjacent) Ts then you're passing through a vertex, and you can pick any of the other faces that share that vertex
 					... otherwise there's some mysterious kind of numerical instability
 					-}
 					-- error handling for tangental hits :(
-					case maybe 0 (length . filter (== T)) $ turnsHit origin ray cell i of
+					case maybe 0 (length . filter (== T)) $ turnsHit (deformFace d c i) o r c i of
 						1 ->
-							case mj origin ray cell i of
-								Just j -> Just (f, Face c j Back point)
+							case mj i of
+								Just j -> Just (f, Face c j Back point (deformFace d c j))
 								Nothing -> error "Weird instability while error-correcting for back face."
 						0 -> Nothing -- error "Tangental hit without any visible tangents on a front face :("
 						_ -> Nothing -- error "Tangental hit on vertex, with only front face."
-				(Nothing, Just b@(Face c i _ point)) ->
-					case maybe 0 (length . filter (== T)) $ turnsHit origin ray cell i of
+				(Nothing, Just b@(Face nc i _ point _)) ->
+					case maybe 0 (length . filter (== T)) $ turnsHit (deformFace d c i) o r c i of
 						1 ->
-							case mj origin ray cell i of
-								Just j -> Just (Face c j Front point, b)
+							case mj i of
+								Just j -> Just (Face nc j Front point (deformFace d c j), b)
 								Nothing -> error "Weird instability while error-correcting for front face."
 						0 -> Nothing -- error "Tangental hit without any visible tangents on a back face :("
 						_ -> Nothing -- error "Tangental hit on vertex, with only back face."
 				_ -> Nothing
 			where
-				mf = check Front fs
-				mb = check Back fs
 				check s =
 					listToMaybe .
-						filter (\(Face _ _ t _) -> s == t)
+						filter (\(Face _ _ t _ _) -> s == t)
 				fs =
-					mapMaybe (quadHit origin ray cell) [0..11]
-				mj o r c i = do
-					t <- (=<<) (elemIndex T) $ turnsHit o r c i
+					mapMaybe (\i -> quadHit (deformFace d c i) o r c i) [0..11]
+				mj i = do
+					t <- elemIndex T =<< turnsHit (deformFace d c i) o r c i
 					let u = (t + 1) `mod` 4
 					let tv = (!! t) (points $ fst $ faces !! i)
 					let uv = (!! u) (points $ fst $ faces !! i)
@@ -298,26 +306,32 @@ raycast' o r c =
 									zip [0..] $
 										fmap fst faces
 
-turnsHit ::  WorldSpace -> V3 Float -> RD.Coordinate -> Int -> Maybe [Turn]
-turnsHit o r c i = pointInQuad' q i <$> mpoint
+turnsHit :: XQuad (V3 Float -> V3 Float) -> WorldSpace -> V3 Float -> RD.Coordinate -> Int -> Maybe [Turn]
+turnsHit d o r c i = pointInQuad' q i <$> mpoint
 	where
-		q@(XQuad _ v0 v1 v2 v3) = fmap ((RD.lattice c +) . v) . fst $ faces !! i
-		mpoint = fmap (\t -> o + (r ^* t)) $ planeLineIntersection (quadPlane q i) o r
+		q@(XQuad _ v0 v1 v2 v3) =
+			recross . (d <*>) .
+				fmap ((RD.lattice c +) . v) . fst $ faces !! i
+		mpoint =
+			fmap (\t -> o + (r ^* t)) $
+				planeLineIntersection (quadPlane q i) o r
 
-quadHit :: WorldSpace -> V3 Float -> RD.Coordinate -> Int -> Maybe Face
-quadHit o r c i =
+quadHit :: XQuad (V3 Float -> V3 Float) -> WorldSpace -> V3 Float -> RD.Coordinate -> Int -> Maybe Face
+quadHit d o r c i =
 	if fromMaybe False $ pointInQuad q i <$> mpoint
-		then Face c i <$> mside <*> mpoint
+		then Face c i <$> mside <*> mpoint <*> pure d
 		else Nothing
 	where
-		-- (since we're making this quad from first principles its normal isn't correct + its normal is also gonna be in the normals list)
-		q@(XQuad _ v0 v1 v2 v3) = fmap ((RD.lattice c +) . v) . fst $ faces !! i
-		n = ns !! i
+		q@(XQuad n v0 v1 v2 v3) =
+			recross . (d <*>) .
+				fmap ((RD.lattice c +) . v) . fst $ faces !! i
 		mside = case r `dot` n of
 			x	|	x < 0 -> Just Front
 				|	x > 0 -> Just Back
 				|	otherwise -> Nothing
-		mpoint = fmap (\t -> o + (r ^* t)) $ planeLineIntersection (quadPlane q i) o r
+		mpoint =
+			fmap (\t -> o + (r ^* t)) $
+				planeLineIntersection (quadPlane q i) o r
 
 turns :: (Num a, Ord a) => V2 a -> (V2 a, V2 a) -> Turn
 turns (V2 ox oy) (V2 l1x l1y, V2 l2x l2y) =
@@ -331,12 +345,12 @@ pointInQuad q i p = (== 1) . length . group . filter (/= T) $ pointInQuad' q i p
 
 -- this is side-agnostic; i think the thing is if the dimension dropped is negative then we can flip around the resulting V2s (i.e., V2 z y instead of V2 y z) to get a situation where all Ls means front face hit and all Rs means back face hit. as it is, since we don't, sometimes either can mean either
 pointInQuad' :: (Floating a, Epsilon a, Ord a) => XQuad (V3 a) -> Int -> V3 a -> [Turn]
-pointInQuad' q@(XQuad _ v0 v1 v2 v3) i p = fmap (turns $ project2d p) lines
+pointInQuad' q@(XQuad n v0 v1 v2 v3) i p = fmap (turns $ project2d p) lines
 	where
 		lines = zip (points flat) (rotate 1 $ points flat)
 			where
 				flat = fmap project2d q
-		(V3 nx ny nz) = fmap abs $ ns !! i
+		(V3 nx ny nz) = fmap abs n
 		project2d =
 			case maximum [nx, ny, nz] of
 				m	|	m == nx -> \(V3 _ y z) -> V2 y z
@@ -359,13 +373,8 @@ planeLineIntersection (Plane n o) l0 l1 =
 	where
 		l0' = l0 - o
 
--- this isn't used currently b/c _evidently_ it's kind of expensive. who would have thought.
-quadNormal :: (Floating a, Epsilon a) => XQuad (V3 a) -> V3 a
-quadNormal (XQuad _ v0 v1 _ v3) = normalize $ (v1 - v0) `cross` (v3 - v0)
-
--- this becomes Float-specific due to looking up the normal rather than calculating it from scratch
-quadPlane :: XQuad (V3 Float) -> Int -> Plane Float
-quadPlane q@(XQuad _ v0 _ _ _) i = Plane (ns !! i) v0
+quadPlane :: Floating a => XQuad (V3 a) -> Int -> Plane a
+quadPlane q@(XQuad n v0 _ _ _) i = Plane n v0
 
 -- todo: all the deformation code does the same thing, but the code itself is phrased slightly different in all cases. ideally it should all be almost identical, or even like a typeclass that some Edge Center Vertex data types are instances of. particularly the direction of each pushvector is really confusing since the code to generate them is different in all three cases even though there's no reason for it not to be identical
 
@@ -425,22 +434,41 @@ emittance (CellFace t _ (V4 ir ig ib il) _) =
 		e = Material.light t
 		V4 mr mg mb _ = Material.color t
 
--- todo: split this into two functions, one of which is Map RD.Coordinate Cell -> Map TO.Coordinate (V3 Float) and the other is i guess Map RD.Coordinate Cell -> Map.TO.Coordinate (V3 Float) -> Map.RD.Coordinate [CellFaceQ]. but seeing as how that's probably not gonna be _faster_ it's not really high-priority
-geometry :: Map RD.Coordinate Cell -> Map RD.Coordinate [CellFaceQ]
-geometry w = Map.mapWithKey (\c -> fmap (reface c) . visibleFaces c) w
+--todo: reduce duplication below. note the two almost-identical visible & cellFaces functions.
+
+-- turn a cell map into a vertex deformation map (w/ only vertices used in at least one visible face set) ACTUALLY STRIKE THAT THIS IS JUST EVERY VERTEX, W/E
+deformations :: Map RD.Coordinate Cell -> Map TO.Coordinate (V3 Float)
+deformations cw =
+	Map.foldrWithKey vertex Map.empty .
+		Map.mapWithKey visibleFaces $
+			cw
+	where
+		vertex :: RD.Coordinate -> (Material, [Int]) -> Map TO.Coordinate (V3 Float) -> Map TO.Coordinate (V3 Float)
+		vertex c (t, is) vw =
+			Map.union vw . Map.fromList .
+				fmap (toTetOct c &&& matDeform cw c) $
+					is
+		visibleFaces :: RD.Coordinate -> Cell -> (Material, [Int])
+		visibleFaces c cell = {-(\(t, is) -> (t, filter (visible t) is)) .-} cellFaces $ cell
+			where
+				visible :: Material -> Int -> Bool
+				visible t i =
+					-- i.e., don't generate faces for air cells
+					not (Material.isTransparent t) &&
+						-- True/False here determines if unloaded cells are considered to be solid for geometry-generation purposes. On the whole they shouldn't be (thus True) but sometimes it's useful to see just where the loaded map stops
+						(not . maybe True (Material.isOpaque . cellType) $ adjacent cw c i)
+				cellFaces :: Cell -> (Material, [Int])
+				cellFaces (Cell t) = (t, [0..11])
+
+geometry :: Map RD.Coordinate Cell -> Map TO.Coordinate (V3 Float) -> Map RD.Coordinate [CellFaceQ]
+geometry cw vw = Map.mapWithKey (\c -> fmap (reface c) . visibleFaces c) cw
 	where
 		reface :: RD.Coordinate -> CellFace () -> CellFaceQ
 		reface c (CellFace t f l _) =
 			CellFace t f l .
 				recross $
-					XQuad 0 v0 v1 v2 v3
-			where
-				(v0:v1:v2:v3:_) =
-					zipWith (+)
-						(points . fmap (matDeform w c) $ base)
-						(points . fmap ((RD.lattice c +) . v) $ base)
-					where
-						base = fst $ faces !! f
+					(deformFace vw c f <*>) .
+						fmap ((RD.lattice c +) . v) . fst $ faces !! f
 		visibleFaces :: RD.Coordinate -> Cell -> [CellFace ()]
 		visibleFaces c cell = filter visible . cellFaces $ cell
 			where
@@ -449,12 +477,12 @@ geometry w = Map.mapWithKey (\c -> fmap (reface c) . visibleFaces c) w
 					-- i.e., don't generate faces for air cells
 					not (Material.isTransparent t) &&
 						-- True/False here determines if unloaded cells are considered to be solid for geometry-generation purposes. On the whole they shouldn't be (thus True) but sometimes it's useful to see just where the loaded map stops
-						(not . maybe True (Material.isOpaque . cellType) $ adjacent w c i)
+						(not . maybe True (Material.isOpaque . cellType) $ adjacent cw c i)
 				cellFaces :: Cell -> [CellFace ()]
 				cellFaces (Cell t) = CellFace t <$> [0..11] <*> pure (V4 0 0 0 0) <*> pure ()
 
 lighting ::  Map RD.Coordinate [CellFaceQ] -> Map RD.Coordinate [CellFaceQ]
-lighting w = Map.mapWithKey (\c -> fmap (update c)) w
+lighting w = Map.mapWithKey (fmap . update) w
 	where
 		lights :: [(RD.Coordinate, CellFaceQ)]
 		lights =
@@ -478,19 +506,17 @@ lighting w = Map.mapWithKey (\c -> fmap (update c)) w
 -- idk how to really deal with how this might be lit by multiple faces of the same cell at one time. increasing the number of light sources also increases the power of the lighting. one thing to maybe see if you can include: the angle of the lit _face_ vs. the target face. right now it compares the face normal of the target with the _angle_ of the light, totally ignoring the face normal of the _source_.
 lightFrom :: Map RD.Coordinate [CellFaceQ] -> (RD.Coordinate, CellFaceQ) -> RD.Coordinate -> CellFaceQ -> V4 Float
 lightFrom w (lc, lf@(CellFace _ li _ _)) c (CellFace _ i _ q@(XQuad n _ _ _ _)) =
-		if lc == c -- don't bother calculating self-shadowing; it doesn't end well (there are zero-length rays when raycasting)
+		-- don't even bother colliding if this is distant enough to be weak. note: "weakness" in proper radiosity terms is not a fixed quantity, so when multiple passes become a thing this should be checked again (b/c then "weakness" can we revised upwards b/c there's a lot more total light in the scene)
+		-- don't bother calculating self-shadowing; it doesn't end well (there are zero-length rays when raycasting)
+		if lc == c || (\(V4 _ _ _ l) -> l) light < 0.0125
 			then 0
 			else
-				-- don't even bother colliding if this is distant enough to be weak. note: "weakness" in proper radiosity terms is not a fixed quantity, so when multiple passes become a thing this should be checked again (b/c then "weakness" can we revised upwards b/c there's a lot more total light in the scene)
-				if (\(V4 _ _ _ l) -> l) light < 0.0125
-					then 0
-					else
-						-- cast from the light to the target
-						case collide 50 lightCentroid diff (hitVisibleFace w) of
-							Nothing -> 0
-							Just f@(Face hit _ _ _, _)
-								|	hit == c -> light
-								|	otherwise -> 0
+				-- cast from the light to the target
+				case collide Map.empty 50 lightCentroid diff (hitVisibleFace w) of
+					Nothing -> 0
+					Just f@(Face hit _ _ _ _, _)
+						|	hit == c -> light
+						|	otherwise -> 0
 		where
 			light = d * θ *^ emittance lf
 			lightCentroid = (RD.lattice lc +) . centroid . points . fmap v . fst $ faces !! li
@@ -513,7 +539,8 @@ liftFst (ma, b) = do
 	return (a, b)
 
 hitVisibleFace :: Map RD.Coordinate [CellFaceQ] -> (Face, Face) -> Bool
-hitVisibleFace w (Face c f _ _, _) =
+hitVisibleFace w (Face c f _ _ _, _) =
 	case Map.lookup c w of
 		Nothing -> True
 		Just fs -> any (\(CellFace _ cf _ _) -> f == cf) fs
+

@@ -13,7 +13,8 @@ import Linear.V3
 import Linear.V4
 
 data Material
-	= Air
+	= Void
+	| Air
 	| Dirt
 	| Clay
 	| Rock
