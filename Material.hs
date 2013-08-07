@@ -44,7 +44,7 @@ light x = case x of
 
 
 push :: Material -> Float
-push Air = 0.5
+push Air = 0.7
 push Dirt = 0.7
 push Clay = 0.75
 push Rock = 0.8

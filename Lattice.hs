@@ -411,7 +411,7 @@ matDeform m c i = noise + smooth
 				l = genericLength cells
 				typePush :: [(Material, V3 Float)] -> V3 Float
 				typePush [] = 0
-				typePush (v@(t,_):vs) = (Material.push t *^) . (c *^) . (/ l) . sum . fmap snd $ v:vs
+				typePush (v@(t,_):vs) = (Material.push t *^) . (c *^) . (/ l) . normalize . sum . fmap snd $ v:vs
 					where
 						c = genericLength vs + 1
 
