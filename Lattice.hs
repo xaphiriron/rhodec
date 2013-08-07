@@ -194,11 +194,34 @@ adjacent :: Map RD.Coordinate Cell -> RD.Coordinate -> Int -> Maybe Cell
 adjacent w c i = (`Map.lookup` w) . (c +) . snd $ faces !! i
 
 
+{- i dont know anything about how this works. i designed it around having to
+   offset by 0 -2 0 to get the TO origin cell to line up with the bottom RD
+   vertex -- that's vertex 10, which accounts for those particular magic
+   numbers. originally this was just:
+toRhombic toc =
+	let rc = RD.unlatticeI . subtract (v 10) . TO.lattice $ toc
+	in fmap (first (rc +) . swap) $ sharedVertices !! 10
+   except, of course, there are TO coordinates that don't correspond to the
+   8--13 set of shared vertices. specifically, the TO coordinates that are
+   tetrahedral cells corresond to one of two other shared vertex sets. i don't
+   know why 5 is the magic number in one and not subtracting v 10 and 7 is the
+   magic number in the other. i suspect it has more to do with the integer
+   division in unlatticeI than anything else. if you have to alter this in the
+   future, i'm sorry.
+    - tzh 2013 08 06
+-}
 toRhombic :: TO.Coordinate -> [(RD.Coordinate, Int)]
 toRhombic toc =
-	fmap (first (rc +) . swap) $ sharedVertices !! 10
-	where
-		rc = RD.unlatticeI . (subtract $ v 10) . TO.lattice $ toc
+	case TO.cellType toc of
+		TO.Octahedral -> -- 8 9 10 11 12 13
+			let rc = RD.unlatticeI . subtract (v 10) . TO.lattice $ toc
+			in fmap (first (rc +) . swap) $ sharedVertices !! 10
+		TO.Tetrahedralα -> -- 0 3 5 6
+			let rc = RD.unlatticeI . subtract (v 10) . TO.lattice $ toc
+			in fmap (first (rc +) . swap) $ sharedVertices !! 5
+		TO.Tetrahedralβ -> -- 1 2 4 7
+			let rc = RD.unlatticeI . subtract (V3 0 0 0) . TO.lattice $ toc
+			in fmap (first (rc +) . swap) $ sharedVertices !! 7
 
 toTetOct :: RD.Coordinate -> Int -> TO.Coordinate
 toTetOct rc i =
